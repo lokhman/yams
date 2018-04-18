@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>YAMS Error</title>
+</head>
+<body style="font-family: sans-serif">
+    <h1 style="font-size: x-large">YAMS Error</h1>
+    {{ if .Route -}}
+        <hr noshade size="1">
+        <div style="font-size: small">
+            {{- range $v := .Route.Debug -}}
+                <strong>{{index $v 0}}:</strong> {{index $v 1}}<br>
+            {{- end -}}
+        </div>
+        <hr noshade size="1">
+    {{- end }}
+    <pre>{{.String}}</pre>
+</body>
+</html>
