@@ -4,8 +4,10 @@ import (
 	"database/sql"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/lib/pq"
+	"github.com/lokhman/yams/utils"
 )
 
 type route struct {
@@ -26,9 +28,24 @@ func (r route) Debug() [][2]string {
 	}
 }
 
-func (r *route) execute(resp http.ResponseWriter, req *http.Request) error {
-	s := &script{route: r, resp: resp, req: req}
-	return s.execute()
+func (r *route) execute(rw http.ResponseWriter, req *http.Request) {
+	sid := strings.TrimSpace(req.Header.Get(headerSessionID))
+	if len(sid) > sessionIDSize {
+		sid = sid[:sessionIDSize]
+	}
+	if sid == "" {
+		sid = utils.RandString(sessionIDSize)
+	}
+
+	if r.profile.debug {
+		rw.Header().Set(headerStatus, statusIntercepted)
+		rw.Header().Set(headerRouteID, r.uuid)
+		rw.Header().Set(headerSessionID, sid)
+	}
+
+	if err := newScript(r, rw, req, sid).execute(); err != nil {
+		panic(err)
+	}
 }
 
 func matchRoute(p *profile, method, path string) *route {

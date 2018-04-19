@@ -12,6 +12,7 @@ type profile struct {
 	host    string
 	backend *string
 	debug   bool
+	varsLT  int
 }
 
 func (p *profile) proxy(w http.ResponseWriter, r *http.Request) {
@@ -31,8 +32,8 @@ func (p *profile) proxy(w http.ResponseWriter, r *http.Request) {
 func matchProfile(host string) *profile {
 	p := &profile{host: host}
 
-	q := `SELECT id, backend, debug FROM profiles WHERE $1 = ANY(hosts)`
-	if err := DB.QueryRow(q, host).Scan(&p.id, &p.backend, &p.debug); err != nil {
+	q := `SELECT id, backend, debug, vars_lifetime FROM profiles WHERE $1 = ANY(hosts)`
+	if err := DB.QueryRow(q, host).Scan(&p.id, &p.backend, &p.debug, &p.varsLT); err != nil {
 		if err == sql.ErrNoRows {
 			return nil
 		}

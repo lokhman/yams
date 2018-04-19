@@ -10,12 +10,15 @@ import (
 )
 
 const (
-	headerStatus = "x-yams-status"
-	headerRoute  = "x-yams-route"
+	headerStatus    = "x-yams-status"
+	headerRouteID   = "x-yams-route-id"
+	headerSessionID = "x-yams-session-id"
 
 	statusError       = "error"
 	statusProxy       = "proxy"
 	statusIntercepted = "intercepted"
+
+	sessionIDSize = 24
 )
 
 var (
@@ -33,9 +36,11 @@ type server struct {
 type handler struct{}
 
 func (s *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	var yr *route
+
 	defer (func() {
 		if err := recover(); err != nil {
-			proxyError{http.StatusInternalServerError, fmt.Sprintf("%v", err), nil}.write(w)
+			proxyError{http.StatusInternalServerError, fmt.Sprintf("%v", err), yr}.write(w)
 		}
 	})()
 
@@ -45,7 +50,7 @@ func (s *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	yr := matchRoute(yp, r.Method, r.URL.Path)
+	yr = matchRoute(yp, r.Method, r.URL.Path)
 	if yr == nil {
 		if yp.backend == nil {
 			proxyError{http.StatusNotFound, fmt.Sprintf(`No route found for path "%s"`, r.URL.Path), nil}.write(w)
@@ -56,12 +61,5 @@ func (s *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if yp.debug {
-		w.Header().Set(headerStatus, statusIntercepted)
-		w.Header().Set(headerRoute, yr.uuid)
-	}
-
-	if err := yr.execute(w, r); err != nil {
-		proxyError{http.StatusInternalServerError, err.Error(), yr}.write(w)
-	}
+	yr.execute(w, r)
 }
