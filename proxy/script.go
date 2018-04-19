@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -15,8 +14,8 @@ import (
 	"time"
 
 	"github.com/lokhman/yams-lua"
-	luaBase64 "github.com/lokhman/yams-lua-base64"
-	luaJSON "github.com/lokhman/yams-lua-json"
+	"github.com/lokhman/yams-lua-base64"
+	"github.com/lokhman/yams-lua-json"
 	"github.com/lokhman/yams/utils"
 )
 
@@ -37,8 +36,9 @@ func (s *script) execute() error {
 	l := lua.NewState()
 	defer l.Close()
 
-	luaJSON.Preload(l)
-	luaBase64.Preload(l)
+	json.Preload(l)
+	base64.Preload(l)
+
 	l.PreloadModule("yams", s.loader)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(s.route.timeout)*time.Second)
@@ -235,7 +235,7 @@ func (s *script) fnGetVar(l *lua.LState) int {
 	if _, err := DB.Exec(q, s.route.profile.id, sid, k); err != nil {
 		panic(err)
 	}
-	v, err := luaJSON.Decode(l, vb)
+	v, err := json.Decode(l, vb)
 	if err != nil {
 		panic(err)
 	}
@@ -257,7 +257,7 @@ func (s *script) fnSetVar(l *lua.LState) int {
 		if lt > s.route.profile.varsLft {
 			l.ArgError(4, fmt.Sprintf("lifetime must not exceed profile setting [%d]", s.route.profile.varsLft))
 		}
-		vb, err := luaJSON.Encode(v)
+		vb, err := json.Encode(v)
 		if err != nil {
 			panic(err)
 		}
@@ -340,12 +340,7 @@ func assetFnGetSize(l *lua.LState) int {
 }
 
 func assetFnToString(l *lua.LState) int {
-	buf := assetRead(assetCheck(l))
-	if s := string(buf); utils.IsBinaryString(s) {
-		l.Push(lua.LString(base64.StdEncoding.EncodeToString(buf)))
-	} else {
-		l.Push(lua.LString(s))
-	}
+	l.Push(lua.LString(string(assetRead(assetCheck(l)))))
 	return 1
 }
 
