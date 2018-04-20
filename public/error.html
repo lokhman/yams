@@ -6,7 +6,7 @@
 </head>
 <body style="font-family: sans-serif">
     <h1 style="font-size: x-large">YAMS Error</h1>
-    {{ if .Route -}}
+    {{- if .Route -}}
         <hr noshade size="1">
         <div style="font-size: small">
             {{- range $v := .Route.Debug -}}
@@ -14,7 +14,10 @@
             {{- end -}}
         </div>
         <hr noshade size="1">
-    {{- end }}
+    {{- end -}}
+    {{- if .Caller -}}
+        <div style="font-family: monospace">{{.Caller}}</div>
+    {{- end -}}
     <pre>{{.String}}</pre>
 </body>
 </html>

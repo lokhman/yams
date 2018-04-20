@@ -7,7 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"strconv"
 	"strings"
 	"text/template"
@@ -16,10 +19,11 @@ import (
 	"github.com/lokhman/yams-lua"
 	"github.com/lokhman/yams-lua-base64"
 	"github.com/lokhman/yams-lua-json"
-	"github.com/lokhman/yams/utils"
+	"github.com/lokhman/yams/yams"
 )
 
 type script struct {
+	mod    *lua.LTable
 	route  *route
 	rw     http.ResponseWriter
 	req    *http.Request
@@ -29,7 +33,7 @@ type script struct {
 }
 
 func newScript(r *route, rw http.ResponseWriter, req *http.Request, sid string) *script {
-	return &script{r, rw, req, sid, 0, nil}
+	return &script{route: r, rw: rw, req: req, sid: sid}
 }
 
 func (s *script) execute() error {
@@ -59,79 +63,73 @@ func (s *script) execute() error {
 }
 
 func (s *script) loader(l *lua.LState) int {
-	mod := l.NewTable()
+	s.mod = l.NewTable()
 
 	// constants
-	l.SetField(mod, "routeid", lua.LString(s.route.uuid))
-	l.SetField(mod, "method", lua.LString(s.req.Method))
-	l.SetField(mod, "host", lua.LString(s.req.Host))
-	l.SetField(mod, "uri", lua.LString(s.req.URL.Path))
-	l.SetField(mod, "querystring", lua.LString(s.req.URL.RawQuery))
-	l.SetField(mod, "remoteaddr", lua.LString(s.req.RemoteAddr))
-	l.SetField(mod, "sessionid", lua.LString(s.sid))
+	l.SetField(s.mod, "routeid", lua.LString(s.route.uuid))
+	l.SetField(s.mod, "method", lua.LString(s.req.Method))
+	l.SetField(s.mod, "host", lua.LString(s.req.Host))
+	l.SetField(s.mod, "uri", lua.LString(s.req.URL.Path))
+	l.SetField(s.mod, "ip", lua.LString(ip(s.req)))
+	l.SetField(s.mod, "sessionid", lua.LString(s.sid))
+	l.SetField(s.mod, "form", l.CreateTable(0, 0))
+
+	// TODO: add uploaded files support
+	// l.SetField(s.mod, "files", l.CreateTable(0, 0))
 
 	// request path parameters
-	p := l.CreateTable(0, len(s.route.params))
-	for k, v := range s.route.params {
-		p.RawSetString(k, lua.LString(v))
+	t := l.CreateTable(0, len(s.route.args))
+	for k, v := range s.route.args {
+		t.RawSetString(k, lua.LString(v))
 	}
-	l.SetField(mod, "params", p)
+	l.SetField(s.mod, "args", t)
 
 	// request headers
-	h := l.CreateTable(0, len(s.req.Header))
+	t = l.CreateTable(0, len(s.req.Header))
 	for k, vv := range s.req.Header {
-		hv := l.CreateTable(len(vv), 0)
+		tt := l.CreateTable(len(vv), 0)
 		for _, v := range vv {
-			hv.Append(lua.LString(v))
+			tt.Append(lua.LString(v))
 		}
-		h.RawSetString(k, hv)
+		t.RawSetString(k, tt)
 	}
-	l.SetField(mod, "headers", h)
+	l.SetField(s.mod, "headers", t)
 
 	// request query parameters
 	query := s.req.URL.Query()
-	q := l.CreateTable(0, len(query))
+	t = l.CreateTable(0, len(query))
 	for k, vv := range query {
-		qv := l.CreateTable(len(vv), 0)
+		tt := l.CreateTable(len(vv), 0)
 		for _, v := range vv {
-			qv.Append(lua.LString(v))
+			tt.Append(lua.LString(v))
 		}
-		q.RawSetString(k, qv)
+		t.RawSetString(k, tt)
 	}
-	l.SetField(mod, "query", q)
-
-	// request form parameters
-	s.req.ParseForm()
-	f := l.CreateTable(0, len(s.req.PostForm))
-	for k, vv := range s.req.PostForm {
-		fv := l.CreateTable(len(vv), 0)
-		for _, v := range vv {
-			fv.Append(lua.LString(v))
-		}
-		f.RawSetString(k, fv)
-	}
-	l.SetField(mod, "form", f)
+	l.SetField(s.mod, "query", t)
 
 	// cookies
 	cookies := s.req.Cookies()
-	c := l.CreateTable(0, len(cookies))
+	t = l.CreateTable(0, len(cookies))
 	for _, cookie := range cookies {
-		c.RawSetString(cookie.Name, lua.LString(cookie.Value))
+		t.RawSetString(cookie.Name, lua.LString(cookie.Value))
 	}
-	l.SetField(mod, "cookies", c)
+	l.SetField(s.mod, "cookies", t)
 
 	// exposed functions
-	l.SetFuncs(mod, map[string]lua.LGFunction{
+	l.SetFuncs(s.mod, map[string]lua.LGFunction{
 		"setstatus": s.fnSetStatus,
 		"getheader": s.fnGetHeader,
 		"setheader": s.fnSetHeader,
 		"setcookie": s.fnSetCookie,
-		"get":       s.fnGet,
+		"parseform": s.fnParseForm,
+		"getparam":  s.fnGetParam,
+		"getbody":   s.fnGetBody,
 		"asset":     s.fnAsset,
 		"sleep":     s.fnSleep,
 		"write":     s.fnWrite,
 		"getvar":    s.fnGetVar,
 		"setvar":    s.fnSetVar,
+		"dump":      s.fnDump,
 		"wbclean":   s.fnWbClean,
 		"pass":      s.fnPass,
 		"exit":      s.fnExit,
@@ -147,7 +145,7 @@ func (s *script) loader(l *lua.LState) int {
 		"__tostring":  assetFnToString,
 	})
 
-	l.Push(mod)
+	l.Push(s.mod)
 	return 1
 }
 
@@ -157,8 +155,7 @@ func (s *script) fnSetStatus(l *lua.LState) int {
 }
 
 func (s *script) fnGetHeader(l *lua.LState) int {
-	k := l.CheckString(1)
-	l.Push(lua.LString(s.req.Header.Get(k)))
+	l.Push(lua.LString(s.req.Header.Get(l.CheckString(1))))
 	return 1
 }
 
@@ -188,11 +185,35 @@ func (s *script) fnSetCookie(l *lua.LState) int {
 	return 0
 }
 
-func (s *script) fnGet(l *lua.LState) int {
+func (s *script) fnParseForm(l *lua.LState) int {
+	mem := l.OptInt64(1, maxMemory)
+	if mem > maxMemory {
+		l.ArgError(1, fmt.Sprintf("maxmemory value must be not higher than %d", maxMemory))
+	}
+	s.req.ParseMultipartForm(mem)
+	var form url.Values
+	if s.req.MultipartForm != nil {
+		form = s.req.MultipartForm.Value
+	} else {
+		form = s.req.PostForm
+	}
+	t := l.GetField(s.mod, "form").(*lua.LTable)
+	for k, vv := range form {
+		tt := l.CreateTable(len(vv), 0)
+		for _, v := range vv {
+			tt.Append(lua.LString(v))
+		}
+		t.RawSetString(k, tt)
+	}
+	l.SetField(s.mod, "form", t)
+	return 0
+}
+
+func (s *script) fnGetParam(l *lua.LState) int {
 	k := l.CheckString(1)
 	if v, ok := s.req.URL.Query()[k]; ok && len(v) > 0 {
 		l.Push(lua.LString(v[0]))
-	} else if v, ok := s.route.params[k]; ok {
+	} else if v, ok := s.route.args[k]; ok {
 		l.Push(lua.LString(v))
 	} else if v, ok := s.req.PostForm[k]; ok && len(v) > 0 {
 		l.Push(lua.LString(v[0]))
@@ -202,10 +223,27 @@ func (s *script) fnGet(l *lua.LState) int {
 	return 1
 }
 
+func (s *script) fnGetBody(l *lua.LState) int {
+	if s.req.Body == http.NoBody {
+		l.Push(lua.LNil)
+		return 1
+	}
+	if s.req.PostForm != nil || s.req.MultipartForm != nil {
+		l.RaiseError("request body was already parsed")
+	}
+	b, err := ioutil.ReadAll(s.req.Body)
+	if err != nil {
+		panic(err)
+	}
+	s.req.Body = ioutil.NopCloser(bytes.NewBuffer(b))
+	l.Push(lua.LString(b))
+	return 1
+}
+
 func (s *script) fnAsset(l *lua.LState) int {
 	a := &asset{path: l.CheckString(1)}
 	q := `SELECT id, mime_type, octet_length(data) FROM assets WHERE profile_id = $1 AND path = $2`
-	if err := DB.QueryRow(q, s.route.profile.id, a.path).Scan(&a.id, &a.mimeType, &a.size); err != nil {
+	if err := db.QueryRow(q, s.route.profile.id, a.path).Scan(&a.id, &a.mimeType, &a.size); err != nil {
 		if err == sql.ErrNoRows {
 			l.Push(lua.LNil)
 			return 1
@@ -222,7 +260,7 @@ func (s *script) fnAsset(l *lua.LState) int {
 func (s *script) fnSleep(l *lua.LState) int {
 	d := l.CheckNumber(1)
 	if int(d) >= s.route.timeout {
-		l.ArgError(1, fmt.Sprintf("duration should be less than route timeout [%d]", s.route.timeout))
+		l.ArgError(1, fmt.Sprintf("duration must be lower than route timeout [%d]", s.route.timeout))
 	}
 	time.Sleep(time.Duration(d) * time.Second)
 	return 0
@@ -255,7 +293,7 @@ func (s *script) fnGetVar(l *lua.LState) int {
 	}
 	var vb []byte
 	q := `SELECT value FROM storage WHERE profile_id = $1 AND sid IS NOT DISTINCT FROM $2 AND key = $3 AND expires_at > now()`
-	if err := DB.QueryRow(q, s.route.profile.id, sid, k).Scan(&vb); err != nil {
+	if err := db.QueryRow(q, s.route.profile.id, sid, k).Scan(&vb); err != nil {
 		if err == sql.ErrNoRows {
 			l.Push(lua.LNil)
 			return 1
@@ -263,7 +301,7 @@ func (s *script) fnGetVar(l *lua.LState) int {
 		panic(err)
 	}
 	q = `UPDATE storage SET expires_at = now()+(expires_at-updated_at) WHERE profile_id = $1 AND sid IS NOT DISTINCT FROM $2 AND key = $3`
-	if _, err := DB.Exec(q, s.route.profile.id, sid, k); err != nil {
+	if _, err := db.Exec(q, s.route.profile.id, sid, k); err != nil {
 		panic(err)
 	}
 	v, err := json.Decode(l, vb)
@@ -284,24 +322,37 @@ func (s *script) fnSetVar(l *lua.LState) int {
 		sid = &s.sid
 	}
 	if v := l.CheckAny(2); v != lua.LNil {
-		lt := l.OptInt(4, s.route.profile.varsLft)
-		if lt > s.route.profile.varsLft {
-			l.ArgError(4, fmt.Sprintf("lifetime must not exceed profile setting [%d]", s.route.profile.varsLft))
+		lt := l.OptInt(4, s.route.profile.varsLife)
+		if lt > s.route.profile.varsLife {
+			l.ArgError(4, fmt.Sprintf("lifetime must not exceed profile setting [%d]", s.route.profile.varsLife))
 		}
 		vb, err := json.Encode(v)
 		if err != nil {
 			panic(err)
 		}
 		q := `INSERT INTO storage (profile_id, sid, key, value, expires_at) VALUES($1, $2, $3, $4, now() + $5 * INTERVAL '1 second') ON CONFLICT (COALESCE(sid, ''), profile_id, key) DO UPDATE SET value = EXCLUDED.value, expires_at = EXCLUDED.expires_at`
-		if _, err = DB.Exec(q, s.route.profile.id, sid, k, vb, lt); err != nil {
+		if _, err = db.Exec(q, s.route.profile.id, sid, k, vb, lt); err != nil {
 			panic(err)
 		}
 	} else {
 		q := `DELETE FROM storage WHERE profile_id = $1 AND sid IS NOT DISTINCT FROM $2 AND key = $3`
-		if _, err := DB.Exec(q, s.route.profile.id, sid, k); err != nil {
+		if _, err := db.Exec(q, s.route.profile.id, sid, k); err != nil {
 			panic(err)
 		}
 	}
+	return 0
+}
+
+func (s *script) fnDump(l *lua.LState) int {
+	b, err := httputil.DumpRequest(s.req, l.OptBool(1, false))
+	if err != nil {
+		panic(err)
+	}
+	if _, err = s.rw.Write(b); err != nil {
+		panic(err)
+	}
+	s.status, s.wbuf = 0, nil
+	l.Exit()
 	return 0
 }
 
@@ -311,7 +362,8 @@ func (s *script) fnWbClean(l *lua.LState) int {
 }
 
 func (s *script) fnPass(l *lua.LState) int {
-	backend, target := s.route.profile.backend, ""
+	backend := s.route.profile.backend
+	var target string
 	if backend != nil {
 		target = l.OptString(1, *backend)
 	} else {
@@ -350,7 +402,7 @@ func assetCheck(l *lua.LState) *asset {
 
 func assetLoad(w io.Writer, a *asset) {
 	var data sql.RawBytes
-	rows, err := DB.Query(`SELECT data FROM assets WHERE id = $1`, a.id)
+	rows, err := db.Query(`SELECT data FROM assets WHERE id = $1`, a.id)
 	if err != nil {
 		panic(err)
 	}
@@ -388,7 +440,7 @@ func assetFnToString(l *lua.LState) int {
 func assetFnTemplate(l *lua.LState) int {
 	asset, data := assetCheck(l), l.CheckTable(2)
 	s := string(assetRead(asset))
-	if utils.IsBinaryString(s) {
+	if yams.IsBinaryString(s) {
 		l.RaiseError("template() function is not available for binary assets")
 	}
 	buf := bytes.NewBuffer(nil)

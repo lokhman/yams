@@ -4,13 +4,26 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"runtime"
+
+	"github.com/lokhman/yams/yams"
 )
 
 type proxyError struct {
 	status int
-
 	String string
 	Route  *route
+	Caller string
+}
+
+func perr(w http.ResponseWriter, status int, str string, r *route) {
+	var caller string
+	if yams.IsDebug() {
+		if pc, file, line, ok := runtime.Caller(4); ok {
+			caller = fmt.Sprintf("%s:%d (0x%x)", file, line, pc)
+		}
+	}
+	proxyError{status, str, r, caller}.write(w)
 }
 
 func (pe proxyError) write(w http.ResponseWriter) {

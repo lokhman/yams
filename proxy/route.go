@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/lib/pq"
-	"github.com/lokhman/yams/utils"
+	"github.com/lokhman/yams/yams"
 )
 
 type route struct {
@@ -17,7 +17,7 @@ type route struct {
 	path    string
 	script  string
 	timeout int
-	params  map[string]string
+	args    map[string]string
 }
 
 func (r route) Debug() [][2]string {
@@ -30,11 +30,11 @@ func (r route) Debug() [][2]string {
 
 func (r *route) execute(rw http.ResponseWriter, req *http.Request) {
 	sid := strings.TrimSpace(req.Header.Get(headerSessionID))
-	if len(sid) > sessionIDSize {
-		sid = sid[:sessionIDSize]
+	if len(sid) > sidSize {
+		sid = sid[:sidSize]
 	}
 	if sid == "" {
-		sid = utils.RandString(sessionIDSize)
+		sid = yams.RandString(sidSize)
 	}
 
 	if r.profile.debug {
@@ -52,17 +52,17 @@ func matchRoute(p *profile, method, path string) *route {
 	var pk, pv pq.StringArray
 	r := &route{profile: p, method: method}
 
-	q := `SELECT uuid, path, path_params, regexp_matches($3, path_re), script, timeout FROM routes WHERE profile_id = $1 AND $2 = ANY(methods) AND $3 ~ path_re ORDER BY position LIMIT 1`
-	if err := DB.QueryRow(q, p.id, method, path).Scan(&r.uuid, &r.path, &pk, &pv, &r.script, &r.timeout); err != nil {
+	q := `SELECT uuid, path, path_args, regexp_matches($3, path_re), script, timeout FROM routes WHERE profile_id = $1 AND $2 = ANY(methods) AND $3 ~ path_re ORDER BY position LIMIT 1`
+	if err := db.QueryRow(q, p.id, method, path).Scan(&r.uuid, &r.path, &pk, &pv, &r.script, &r.timeout); err != nil {
 		if err == sql.ErrNoRows {
 			return nil
 		}
 		panic(err)
 	}
 
-	r.params = make(map[string]string)
+	r.args = make(map[string]string)
 	for i, key := range pk {
-		r.params[key] = pv[i]
+		r.args[key] = pv[i]
 	}
 
 	return r

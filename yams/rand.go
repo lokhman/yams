@@ -1,4 +1,4 @@
-package utils
+package yams
 
 import (
 	"math/rand"
@@ -13,15 +13,15 @@ const (
 	randIdxMax  = 63 / randIdxBits
 )
 
-// https://stackoverflow.com/a/31832326/1249581
-var randSrc = rand.NewSource(time.Now().UnixNano())
+var randSource = rand.NewSource(time.Now().UnixNano())
 
+// https://stackoverflow.com/a/31832326/1249581
 func RandString(n int) string {
 	out := make([]byte, n)
 
-	for i, cache, remain := n-1, randSrc.Int63(), randIdxMax; i >= 0; {
+	for i, cache, remain := n-1, randSource.Int63(), randIdxMax; i >= 0; {
 		if remain == 0 {
-			cache, remain = randSrc.Int63(), randIdxMax
+			cache, remain = randSource.Int63(), randIdxMax
 		}
 		if idx := int(cache & randIdxMask); idx < len(randBytes) {
 			out[i] = randBytes[idx]

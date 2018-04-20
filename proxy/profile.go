@@ -8,11 +8,11 @@ import (
 )
 
 type profile struct {
-	id      int
-	host    string
-	backend *string
-	debug   bool
-	varsLft int
+	id       int
+	host     string
+	backend  *string
+	debug    bool
+	varsLife int
 }
 
 func (p *profile) proxy(w http.ResponseWriter, r *http.Request) {
@@ -33,12 +33,11 @@ func matchProfile(host string) *profile {
 	p := &profile{host: host}
 
 	q := `SELECT id, backend, debug, vars_lifetime FROM profiles WHERE $1 = ANY(hosts)`
-	if err := DB.QueryRow(q, host).Scan(&p.id, &p.backend, &p.debug, &p.varsLft); err != nil {
+	if err := db.QueryRow(q, host).Scan(&p.id, &p.backend, &p.debug, &p.varsLife); err != nil {
 		if err == sql.ErrNoRows {
 			return nil
 		}
 		panic(err)
 	}
-
 	return p
 }
