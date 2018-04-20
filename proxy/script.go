@@ -112,18 +112,29 @@ func (s *script) loader(l *lua.LState) int {
 	}
 	l.SetField(mod, "form", f)
 
+	// cookies
+	cookies := s.req.Cookies()
+	c := l.CreateTable(0, len(cookies))
+	for _, cookie := range cookies {
+		c.RawSetString(cookie.Name, lua.LString(cookie.Value))
+	}
+	l.SetField(mod, "cookies", c)
+
 	// exposed functions
 	l.SetFuncs(mod, map[string]lua.LGFunction{
 		"setstatus": s.fnSetStatus,
 		"getheader": s.fnGetHeader,
 		"setheader": s.fnSetHeader,
+		"setcookie": s.fnSetCookie,
 		"get":       s.fnGet,
 		"asset":     s.fnAsset,
 		"sleep":     s.fnSleep,
 		"write":     s.fnWrite,
 		"getvar":    s.fnGetVar,
 		"setvar":    s.fnSetVar,
+		"wbclean":   s.fnWbClean,
 		"pass":      s.fnPass,
+		"exit":      s.fnExit,
 	})
 
 	// register asset type
@@ -161,6 +172,22 @@ func (s *script) fnSetHeader(l *lua.LState) int {
 	return 0
 }
 
+func (s *script) fnSetCookie(l *lua.LState) int {
+	cookie := &http.Cookie{
+		Name:     l.CheckString(1),
+		Value:    l.CheckString(2),
+		Path:     l.OptString(4, ""),
+		MaxAge:   l.OptInt(5, 0),
+		Secure:   l.OptBool(6, false),
+		HttpOnly: l.OptBool(7, false),
+	}
+	if expires := l.OptInt(3, 0); expires != 0 {
+		cookie.Expires = time.Now().Add(time.Duration(expires) * time.Second)
+	}
+	http.SetCookie(s.rw, cookie)
+	return 0
+}
+
 func (s *script) fnGet(l *lua.LState) int {
 	k := l.CheckString(1)
 	if v, ok := s.req.URL.Query()[k]; ok && len(v) > 0 {
@@ -193,7 +220,11 @@ func (s *script) fnAsset(l *lua.LState) int {
 }
 
 func (s *script) fnSleep(l *lua.LState) int {
-	time.Sleep(time.Duration(l.CheckNumber(1)) * time.Second)
+	d := l.CheckNumber(1)
+	if int(d) >= s.route.timeout {
+		l.ArgError(1, fmt.Sprintf("duration should be less than route timeout [%d]", s.route.timeout))
+	}
+	time.Sleep(time.Duration(d) * time.Second)
 	return 0
 }
 
@@ -274,6 +305,11 @@ func (s *script) fnSetVar(l *lua.LState) int {
 	return 0
 }
 
+func (s *script) fnWbClean(l *lua.LState) int {
+	s.wbuf = nil
+	return 0
+}
+
 func (s *script) fnPass(l *lua.LState) int {
 	backend, target := s.route.profile.backend, ""
 	if backend != nil {
@@ -285,6 +321,11 @@ func (s *script) fnPass(l *lua.LState) int {
 	defer func() { s.route.profile.backend = backend }()
 	s.route.profile.proxy(s.rw, s.req)
 	s.status, s.wbuf = 0, nil
+	l.Exit()
+	return 0
+}
+
+func (s *script) fnExit(l *lua.LState) int {
 	l.Exit()
 	return 0
 }
