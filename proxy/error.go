@@ -6,20 +6,26 @@ import (
 	"net/http"
 	"runtime"
 
+	"github.com/lokhman/yams/proxy/model"
 	"github.com/lokhman/yams/yams"
+)
+
+const (
+	skipPanic = 4
+	skipError = 1
 )
 
 type proxyError struct {
 	status int
 	String string
-	Route  *route
+	Route  *model.Route
 	Caller string
 }
 
-func perr(w http.ResponseWriter, status int, str string, r *route) {
+func perror(w http.ResponseWriter, status int, str string, r *model.Route, skip int) {
 	var caller string
-	if yams.IsDebug() {
-		if pc, file, line, ok := runtime.Caller(4); ok {
+	if yams.Debug {
+		if pc, file, line, ok := runtime.Caller(skip); ok {
 			caller = fmt.Sprintf("%s:%d (0x%x)", file, line, pc)
 		}
 	}
@@ -27,12 +33,12 @@ func perr(w http.ResponseWriter, status int, str string, r *route) {
 }
 
 func (pe proxyError) write(w http.ResponseWriter) {
-	if pe.Route != nil && !pe.Route.profile.debug {
+	if pe.Route != nil && !pe.Route.Profile.Debug {
 		http.Error(w, fmt.Sprintf("%d %s", pe.status, http.StatusText(pe.status)), pe.status)
 		return
 	}
 
-	w.Header().Set(headerStatus, statusError)
+	w.Header().Set(yams.ProxyHeaderStatus, yams.ProxyStatusError)
 	w.WriteHeader(pe.status)
 
 	t, err := template.ParseFiles("public/error.html")

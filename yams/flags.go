@@ -12,6 +12,9 @@ var (
 	ProxyAddr   = *flag.String("proxy-addr", GetEnv("YAMS_PROXY_ADDR", ":8086"), "Proxy server address")
 	ConsoleAddr = *flag.String("console-addr", GetEnv("YAMS_CONSOLE_ADDR", ":8087"), "Console server address")
 	DSN         = *flag.String("dsn", GetEnv("DATABASE_URL", "postgres://localhost"), "Database connection URL")
+
+	SecretKey = RandBytes(32)
+	Debug     = Mode == gin.DebugMode
 )
 
 func init() {
@@ -23,8 +26,4 @@ func GetEnv(key, value string) string {
 		return value
 	}
 	return value
-}
-
-func IsDebug() bool {
-	return Mode == gin.DebugMode
 }

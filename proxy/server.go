@@ -2,79 +2,85 @@ package proxy
 
 import (
 	"fmt"
-	"net"
 	"net/http"
 	"strings"
 
+	"github.com/lokhman/yams/proxy/adapter"
+	"github.com/lokhman/yams/proxy/model"
 	"github.com/lokhman/yams/yams"
 )
 
-const (
-	headerStatus    = "x-yams-status"
-	headerRouteID   = "x-yams-route-id"
-	headerSessionID = "x-yams-session-id"
-
-	statusError       = "error"
-	statusProxy       = "proxy"
-	statusIntercepted = "intercepted"
-
-	maxMemory = 64 << 20
-	sidSize   = 24
-)
+const sidLength = 24
 
 var Server = &http.Server{
 	Addr:    yams.ProxyAddr,
 	Handler: &handler{},
 }
 
-var db = yams.DB
-
 type handler struct{}
 
-func (s *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	var yr *route
+func (s *handler) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
+	var r *model.Route
+	var err error
 
 	defer (func() {
 		if err := recover(); err != nil {
-			perr(w, http.StatusInternalServerError, fmt.Sprintf("%v", err), yr)
+			perror(rw, http.StatusInternalServerError, fmt.Sprintf("%v", err), r, skipPanic)
 		}
 	})()
 
-	yp := matchProfile(r.Host)
-	if yp == nil {
-		perr(w, http.StatusNotFound, fmt.Sprintf(`No profile configured for host "%s"`, r.Host), nil)
+	p := model.MatchProfile(req.Host)
+	if p == nil {
+		perror(rw, http.StatusNotFound, fmt.Sprintf(`yams: no profile configured for host "%s"`, req.Host), nil, skipError)
 		return
 	}
 
-	yr = matchRoute(yp, r.Method, r.URL.Path)
-	if yr == nil {
-		if yp.backend == nil {
-			perr(w, http.StatusNotFound, fmt.Sprintf(`No route found for path "%s"`, r.URL.Path), nil)
+	r = model.MatchRoute(p, req.Method, req.URL.Path)
+	if r == nil {
+		if p.Backend == nil {
+			perror(rw, http.StatusNotFound, fmt.Sprintf(`yams: no route found for path "%s"`, req.URL.Path), nil, skipError)
 			return
 		}
 
-		yp.proxy(w, r)
+		yams.ReverseProxy(rw, req, *p.Backend, p.Debug)
 		return
 	}
 
-	yr.execute(w, r)
-}
+	sid := strings.TrimSpace(req.Header.Get(yams.ProxyHeaderSessionId))
+	if len(sid) > sidLength {
+		sid = sid[:sidLength]
+	}
+	if sid == "" {
+		sid = yams.RandString(sidLength)
+	}
 
-func ip(r *http.Request) string {
-	ip := r.Header.Get("x-forwarded-for")
-	if index := strings.IndexByte(ip, ','); index >= 0 {
-		ip = ip[0:index]
+	if r.Profile.Debug {
+		rw.Header().Set(yams.ProxyHeaderStatus, yams.ProxyStatusIntercepted)
+		rw.Header().Set(yams.ProxyHeaderRouteId, r.UUID)
+		rw.Header().Set(yams.ProxyHeaderSessionId, sid)
 	}
-	ip = strings.TrimSpace(ip)
-	if ip != "" {
-		return ip
+
+	if r.Timeout == 0 {
+		w, ok := rw.(http.Hijacker)
+		if !ok {
+			panic("yams: unable to hijack response writer")
+		}
+		conn, buf, err := w.Hijack()
+		if err != nil {
+			panic(err)
+		}
+		buf.Flush()
+		conn.Close()
+		return
 	}
-	ip = strings.TrimSpace(r.Header.Get("x-real-ip"))
-	if ip != "" {
-		return ip
+
+	switch r.Adapter {
+	case yams.AdapterLua:
+		err = adapter.NewLuaScript(r, rw, req, sid).Execute()
+	default:
+		panic(fmt.Sprintf(`yams: unknown adapter "%s"`, r.Adapter))
 	}
-	if ip, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr)); err == nil {
-		return ip
+	if err != nil {
+		panic(err)
 	}
-	return ""
 }

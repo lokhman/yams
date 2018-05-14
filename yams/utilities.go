@@ -3,6 +3,7 @@ package yams
 import (
 	"math/rand"
 	"time"
+	"unicode"
 )
 
 const (
@@ -18,7 +19,6 @@ var randSource = rand.NewSource(time.Now().UnixNano())
 // https://stackoverflow.com/a/31832326/1249581
 func RandString(n int) string {
 	out := make([]byte, n)
-
 	for i, cache, remain := n-1, randSource.Int63(), randIdxMax; i >= 0; {
 		if remain == 0 {
 			cache, remain = randSource.Int63(), randIdxMax
@@ -30,6 +30,42 @@ func RandString(n int) string {
 		cache >>= randIdxBits
 		remain--
 	}
-
 	return string(out)
+}
+
+func RandBytes(n int) []byte {
+	out := make([]byte, n)
+	rand.Read(out)
+	return out
+}
+
+func IsBinaryString(s string) bool {
+	for _, r := range s {
+		if !unicode.IsSpace(r) && !unicode.IsPrint(r) {
+			return true
+		}
+	}
+	return false
+}
+
+func IsTextString(s string) bool {
+	return !IsBinaryString(s)
+}
+
+func InStringSlice(slice []string, x string) bool {
+	for _, s := range slice {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}
+
+func InIntSlice(slice []int, x int) bool {
+	for _, s := range slice {
+		if x == s {
+			return true
+		}
+	}
+	return false
 }

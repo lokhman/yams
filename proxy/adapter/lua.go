@@ -1,4 +1,4 @@
-package proxy
+package adapter
 
 import (
 	"bytes"
@@ -19,12 +19,15 @@ import (
 	"github.com/lokhman/yams-lua"
 	"github.com/lokhman/yams-lua-base64"
 	"github.com/lokhman/yams-lua-json"
+	"github.com/lokhman/yams/proxy/model"
 	"github.com/lokhman/yams/yams"
 )
 
-type script struct {
+const luaMaxMemory = 64 << 20
+
+type luaScript struct {
 	mod    *lua.LTable
-	route  *route
+	route  *model.Route
 	rw     http.ResponseWriter
 	req    *http.Request
 	sid    string
@@ -32,11 +35,11 @@ type script struct {
 	wbuf   []func(w http.ResponseWriter)
 }
 
-func newScript(r *route, rw http.ResponseWriter, req *http.Request, sid string) *script {
-	return &script{route: r, rw: rw, req: req, sid: sid}
+func NewLuaScript(r *model.Route, rw http.ResponseWriter, req *http.Request, sid string) *luaScript {
+	return &luaScript{route: r, rw: rw, req: req, sid: sid}
 }
 
-func (s *script) execute() error {
+func (s *luaScript) Execute() error {
 	l := lua.NewState()
 	defer l.Close()
 
@@ -45,11 +48,11 @@ func (s *script) execute() error {
 
 	l.PreloadModule("yams", s.loader)
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(s.route.timeout)*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(s.route.Timeout)*time.Second)
 	defer cancel()
 
 	l.SetContext(ctx)
-	if err := l.DoString(s.route.script); err != nil {
+	if err := l.DoString(s.route.Script); err != nil {
 		return err
 	}
 
@@ -62,15 +65,15 @@ func (s *script) execute() error {
 	return nil
 }
 
-func (s *script) loader(l *lua.LState) int {
+func (s *luaScript) loader(l *lua.LState) int {
 	s.mod = l.NewTable()
 
 	// constants
-	l.SetField(s.mod, "routeid", lua.LString(s.route.uuid))
+	l.SetField(s.mod, "routeid", lua.LString(s.route.UUID))
 	l.SetField(s.mod, "method", lua.LString(s.req.Method))
 	l.SetField(s.mod, "host", lua.LString(s.req.Host))
 	l.SetField(s.mod, "uri", lua.LString(s.req.URL.Path))
-	l.SetField(s.mod, "ip", lua.LString(ip(s.req)))
+	l.SetField(s.mod, "ip", lua.LString(yams.ClientIP(s.req)))
 	l.SetField(s.mod, "sessionid", lua.LString(s.sid))
 	l.SetField(s.mod, "form", l.CreateTable(0, 0))
 
@@ -78,8 +81,8 @@ func (s *script) loader(l *lua.LState) int {
 	// l.SetField(s.mod, "files", l.CreateTable(0, 0))
 
 	// request path parameters
-	t := l.CreateTable(0, len(s.route.args))
-	for k, v := range s.route.args {
+	t := l.CreateTable(0, len(s.route.Args))
+	for k, v := range s.route.Args {
 		t.RawSetString(k, lua.LString(v))
 	}
 	l.SetField(s.mod, "args", t)
@@ -136,30 +139,30 @@ func (s *script) loader(l *lua.LState) int {
 	})
 
 	// register asset type
-	mt := l.NewTypeMetatable(lAssetClass)
+	mt := l.NewTypeMetatable(luaLAssetClass)
 	mt.RawSetString("__index", mt)
 	l.SetFuncs(mt, map[string]lua.LGFunction{
-		"getmimetype": assetFnGetMimeType,
-		"getsize":     assetFnGetSize,
-		"template":    assetFnTemplate,
-		"__tostring":  assetFnToString,
+		"getmimetype": luaAssetFnGetMimeType,
+		"getsize":     luaAssetFnGetSize,
+		"template":    luaAssetFnTemplate,
+		"__tostring":  luaAssetFnToString,
 	})
 
 	l.Push(s.mod)
 	return 1
 }
 
-func (s *script) fnSetStatus(l *lua.LState) int {
+func (s *luaScript) fnSetStatus(l *lua.LState) int {
 	s.status = int(l.CheckNumber(1))
 	return 0
 }
 
-func (s *script) fnGetHeader(l *lua.LState) int {
+func (s *luaScript) fnGetHeader(l *lua.LState) int {
 	l.Push(lua.LString(s.req.Header.Get(l.CheckString(1))))
 	return 1
 }
 
-func (s *script) fnSetHeader(l *lua.LState) int {
+func (s *luaScript) fnSetHeader(l *lua.LState) int {
 	k, v := l.CheckString(1), l.CheckString(2)
 	s.rw.Header().Set(k, v)
 	for i := 3; i <= l.GetTop(); i++ {
@@ -169,7 +172,7 @@ func (s *script) fnSetHeader(l *lua.LState) int {
 	return 0
 }
 
-func (s *script) fnSetCookie(l *lua.LState) int {
+func (s *luaScript) fnSetCookie(l *lua.LState) int {
 	cookie := &http.Cookie{
 		Name:     l.CheckString(1),
 		Value:    l.CheckString(2),
@@ -185,10 +188,10 @@ func (s *script) fnSetCookie(l *lua.LState) int {
 	return 0
 }
 
-func (s *script) fnParseForm(l *lua.LState) int {
-	mem := l.OptInt64(1, maxMemory)
-	if mem > maxMemory {
-		l.ArgError(1, fmt.Sprintf("maxmemory value must be not higher than %d", maxMemory))
+func (s *luaScript) fnParseForm(l *lua.LState) int {
+	mem := l.OptInt64(1, luaMaxMemory)
+	if mem > luaMaxMemory {
+		l.ArgError(1, fmt.Sprintf("maxmemory value must be not higher than %d", luaMaxMemory))
 	}
 	s.req.ParseMultipartForm(mem)
 	var form url.Values
@@ -209,11 +212,11 @@ func (s *script) fnParseForm(l *lua.LState) int {
 	return 0
 }
 
-func (s *script) fnGetParam(l *lua.LState) int {
+func (s *luaScript) fnGetParam(l *lua.LState) int {
 	k := l.CheckString(1)
 	if v, ok := s.req.URL.Query()[k]; ok && len(v) > 0 {
 		l.Push(lua.LString(v[0]))
-	} else if v, ok := s.route.args[k]; ok {
+	} else if v, ok := s.route.Args[k]; ok {
 		l.Push(lua.LString(v))
 	} else if v, ok := s.req.PostForm[k]; ok && len(v) > 0 {
 		l.Push(lua.LString(v[0]))
@@ -223,7 +226,7 @@ func (s *script) fnGetParam(l *lua.LState) int {
 	return 1
 }
 
-func (s *script) fnGetBody(l *lua.LState) int {
+func (s *luaScript) fnGetBody(l *lua.LState) int {
 	if s.req.Body == http.NoBody {
 		l.Push(lua.LNil)
 		return 1
@@ -240,10 +243,10 @@ func (s *script) fnGetBody(l *lua.LState) int {
 	return 1
 }
 
-func (s *script) fnAsset(l *lua.LState) int {
-	a := &asset{path: l.CheckString(1)}
+func (s *luaScript) fnAsset(l *lua.LState) int {
+	a := &luaAsset{path: l.CheckString(1)}
 	q := `SELECT id, mime_type, octet_length(data) FROM assets WHERE profile_id = $1 AND path = $2`
-	if err := db.QueryRow(q, s.route.profile.id, a.path).Scan(&a.id, &a.mimeType, &a.size); err != nil {
+	if err := yams.DB.QueryRow(q, s.route.Profile.Id, a.path).Scan(&a.id, &a.mimeType, &a.size); err != nil {
 		if err == sql.ErrNoRows {
 			l.Push(lua.LNil)
 			return 1
@@ -252,28 +255,28 @@ func (s *script) fnAsset(l *lua.LState) int {
 	}
 	ud := l.NewUserData()
 	ud.Value = a
-	l.SetMetatable(ud, l.GetTypeMetatable(lAssetClass))
+	l.SetMetatable(ud, l.GetTypeMetatable(luaLAssetClass))
 	l.Push(ud)
 	return 1
 }
 
-func (s *script) fnSleep(l *lua.LState) int {
+func (s *luaScript) fnSleep(l *lua.LState) int {
 	d := l.CheckNumber(1)
-	if int(d) >= s.route.timeout {
-		l.ArgError(1, fmt.Sprintf("duration must be lower than route timeout [%d]", s.route.timeout))
+	if int(d) >= s.route.Timeout {
+		l.ArgError(1, fmt.Sprintf("duration must be lower than route timeout [%d]", s.route.Timeout))
 	}
 	time.Sleep(time.Duration(d) * time.Second)
 	return 0
 }
 
-func (s *script) fnWrite(l *lua.LState) int {
+func (s *luaScript) fnWrite(l *lua.LState) int {
 	for i := 1; i <= l.GetTop(); i++ {
 		v := l.Get(i)
 		if ud, ok := v.(*lua.LUserData); ok {
 			switch v := ud.Value.(type) {
-			case *asset:
+			case *luaAsset:
 				s.wbuf = append(s.wbuf, func(w http.ResponseWriter) {
-					assetLoad(w, v)
+					luaAssetLoad(w, v)
 				})
 				continue
 			}
@@ -285,7 +288,7 @@ func (s *script) fnWrite(l *lua.LState) int {
 	return 0
 }
 
-func (s *script) fnGetVar(l *lua.LState) int {
+func (s *luaScript) fnGetVar(l *lua.LState) int {
 	k := l.CheckString(1)
 	var sid *string
 	if l.OptBool(2, false) {
@@ -293,7 +296,7 @@ func (s *script) fnGetVar(l *lua.LState) int {
 	}
 	var vb []byte
 	q := `SELECT value FROM storage WHERE profile_id = $1 AND sid IS NOT DISTINCT FROM $2 AND key = $3 AND expires_at > now()`
-	if err := db.QueryRow(q, s.route.profile.id, sid, k).Scan(&vb); err != nil {
+	if err := yams.DB.QueryRow(q, s.route.Profile.Id, sid, k).Scan(&vb); err != nil {
 		if err == sql.ErrNoRows {
 			l.Push(lua.LNil)
 			return 1
@@ -301,7 +304,7 @@ func (s *script) fnGetVar(l *lua.LState) int {
 		panic(err)
 	}
 	q = `UPDATE storage SET expires_at = now()+(expires_at-updated_at) WHERE profile_id = $1 AND sid IS NOT DISTINCT FROM $2 AND key = $3`
-	if _, err := db.Exec(q, s.route.profile.id, sid, k); err != nil {
+	if _, err := yams.DB.Exec(q, s.route.Profile.Id, sid, k); err != nil {
 		panic(err)
 	}
 	v, err := json.Decode(l, vb)
@@ -312,7 +315,7 @@ func (s *script) fnGetVar(l *lua.LState) int {
 	return 1
 }
 
-func (s *script) fnSetVar(l *lua.LState) int {
+func (s *luaScript) fnSetVar(l *lua.LState) int {
 	k := strings.TrimSpace(l.CheckString(1))
 	if k == "" || len(k) > 255 {
 		l.ArgError(1, "key must be a string of valid length [1:255]")
@@ -322,28 +325,28 @@ func (s *script) fnSetVar(l *lua.LState) int {
 		sid = &s.sid
 	}
 	if v := l.CheckAny(2); v != lua.LNil {
-		lt := l.OptInt(4, s.route.profile.varsLife)
-		if lt > s.route.profile.varsLife {
-			l.ArgError(4, fmt.Sprintf("lifetime must not exceed profile setting [%d]", s.route.profile.varsLife))
+		lt := l.OptInt(4, s.route.Profile.VarsLifetime)
+		if lt > s.route.Profile.VarsLifetime {
+			l.ArgError(4, fmt.Sprintf("lifetime must not exceed profile setting [%d]", s.route.Profile.VarsLifetime))
 		}
 		vb, err := json.Encode(v)
 		if err != nil {
 			panic(err)
 		}
-		q := `INSERT INTO storage (profile_id, sid, key, value, expires_at) VALUES($1, $2, $3, $4, now() + $5 * INTERVAL '1 second') ON CONFLICT (COALESCE(sid, ''), profile_id, key) DO UPDATE SET value = EXCLUDED.value, expires_at = EXCLUDED.expires_at`
-		if _, err = db.Exec(q, s.route.profile.id, sid, k, vb, lt); err != nil {
+		q := `INSERT INTO storage (profile_id, sid, key, value, expires_at) VALUES ($1, $2, $3, $4, now() + $5 * INTERVAL '1 second') ON CONFLICT (COALESCE(sid, ''), profile_id, key) DO UPDATE SET value = EXCLUDED.value, expires_at = EXCLUDED.expires_at`
+		if _, err = yams.DB.Exec(q, s.route.Profile.Id, sid, k, vb, lt); err != nil {
 			panic(err)
 		}
 	} else {
 		q := `DELETE FROM storage WHERE profile_id = $1 AND sid IS NOT DISTINCT FROM $2 AND key = $3`
-		if _, err := db.Exec(q, s.route.profile.id, sid, k); err != nil {
+		if _, err := yams.DB.Exec(q, s.route.Profile.Id, sid, k); err != nil {
 			panic(err)
 		}
 	}
 	return 0
 }
 
-func (s *script) fnDump(l *lua.LState) int {
+func (s *luaScript) fnDump(l *lua.LState) int {
 	b, err := httputil.DumpRequest(s.req, l.OptBool(1, false))
 	if err != nil {
 		panic(err)
@@ -356,53 +359,51 @@ func (s *script) fnDump(l *lua.LState) int {
 	return 0
 }
 
-func (s *script) fnWbClean(l *lua.LState) int {
+func (s *luaScript) fnWbClean(l *lua.LState) int {
 	s.wbuf = nil
 	return 0
 }
 
-func (s *script) fnPass(l *lua.LState) int {
-	backend := s.route.profile.backend
+func (s *luaScript) fnPass(l *lua.LState) int {
+	backend := s.route.Profile.Backend
 	var target string
 	if backend != nil {
 		target = l.OptString(1, *backend)
 	} else {
 		target = l.CheckString(1)
 	}
-	s.route.profile.backend = &target
-	defer func() { s.route.profile.backend = backend }()
-	s.route.profile.proxy(s.rw, s.req)
+	yams.ReverseProxy(s.rw, s.req, target, s.route.Profile.Debug)
 	s.status, s.wbuf = 0, nil
 	l.Exit()
 	return 0
 }
 
-func (s *script) fnExit(l *lua.LState) int {
+func (s *luaScript) fnExit(l *lua.LState) int {
 	l.Exit()
 	return 0
 }
 
-const lAssetClass = "ASSET*"
+const luaLAssetClass = "ASSET*"
 
-type asset struct {
+type luaAsset struct {
 	id       int
 	path     string
 	mimeType string
 	size     int
 }
 
-func assetCheck(l *lua.LState) *asset {
+func luaAssetCheck(l *lua.LState) *luaAsset {
 	ud := l.CheckUserData(1)
-	if v, ok := ud.Value.(*asset); ok {
+	if v, ok := ud.Value.(*luaAsset); ok {
 		return v
 	}
 	l.ArgError(1, "asset expected")
 	return nil
 }
 
-func assetLoad(w io.Writer, a *asset) {
+func luaAssetLoad(w io.Writer, a *luaAsset) {
 	var data sql.RawBytes
-	rows, err := db.Query(`SELECT data FROM assets WHERE id = $1`, a.id)
+	rows, err := yams.DB.Query(`SELECT data FROM assets WHERE id = $1`, a.id)
 	if err != nil {
 		panic(err)
 	}
@@ -416,36 +417,36 @@ func assetLoad(w io.Writer, a *asset) {
 	w.Write(data)
 }
 
-func assetRead(a *asset) []byte {
+func luaAssetRead(a *luaAsset) []byte {
 	buf := bytes.NewBuffer(nil)
-	assetLoad(buf, a)
+	luaAssetLoad(buf, a)
 	return buf.Bytes()
 }
 
-func assetFnGetMimeType(l *lua.LState) int {
-	l.Push(lua.LString(assetCheck(l).mimeType))
+func luaAssetFnGetMimeType(l *lua.LState) int {
+	l.Push(lua.LString(luaAssetCheck(l).mimeType))
 	return 1
 }
 
-func assetFnGetSize(l *lua.LState) int {
-	l.Push(lua.LNumber(assetCheck(l).size))
+func luaAssetFnGetSize(l *lua.LState) int {
+	l.Push(lua.LNumber(luaAssetCheck(l).size))
 	return 1
 }
 
-func assetFnToString(l *lua.LState) int {
-	l.Push(lua.LString(string(assetRead(assetCheck(l)))))
+func luaAssetFnToString(l *lua.LState) int {
+	l.Push(lua.LString(string(luaAssetRead(luaAssetCheck(l)))))
 	return 1
 }
 
-func assetFnTemplate(l *lua.LState) int {
-	asset, data := assetCheck(l), l.CheckTable(2)
-	s := string(assetRead(asset))
+func luaAssetFnTemplate(l *lua.LState) int {
+	asset, data := luaAssetCheck(l), l.CheckTable(2)
+	s := string(luaAssetRead(asset))
 	if yams.IsBinaryString(s) {
 		l.RaiseError("template() function is not available for binary assets")
 	}
 	buf := bytes.NewBuffer(nil)
 	t := template.Must(template.New(asset.path).Parse(s))
-	if err := t.Execute(buf, scriptValueMarshal(data)); err != nil {
+	if err := t.Execute(buf, luaScriptValueMarshal(data)); err != nil {
 		panic(err)
 	}
 	l.Push(lua.LString(buf.Bytes()))
@@ -453,25 +454,25 @@ func assetFnTemplate(l *lua.LState) int {
 }
 
 var (
-	errScriptMarshalFunction = errors.New("cannot marshal function")
-	errScriptMarshalChannel  = errors.New("cannot marshal channel")
-	errScriptMarshalState    = errors.New("cannot marshal state")
-	errScriptMarshalUserData = errors.New("cannot marshal userdata")
-	errScriptMarshalNested   = errors.New("cannot marshal recursively nested tables")
+	luaErrScriptMarshalFunction = errors.New("cannot marshal function")
+	luaErrScriptMarshalChannel  = errors.New("cannot marshal channel")
+	luaErrScriptMarshalState    = errors.New("cannot marshal state")
+	luaErrScriptMarshalUserData = errors.New("cannot marshal userdata")
+	luaErrScriptMarshalNested   = errors.New("cannot marshal recursively nested tables")
 )
 
-type scriptValue struct {
+type luaScriptValue struct {
 	lua.LValue
 	visited map[*lua.LTable]bool
 }
 
-func (sv scriptValue) marshal() interface{} {
+func (sv luaScriptValue) marshal() interface{} {
 	switch cv := sv.LValue.(type) {
 	case lua.LBool, lua.LNumber, lua.LString:
 		return cv
 	case *lua.LTable:
 		if sv.visited[cv] {
-			panic(errScriptMarshalNested)
+			panic(luaErrScriptMarshalNested)
 		}
 		sv.visited[cv] = true
 
@@ -487,10 +488,10 @@ func (sv scriptValue) marshal() interface{} {
 					for i, value := range arr {
 						obj[strconv.Itoa(i+1)] = value
 					}
-					obj[strconv.Itoa(index+1)] = scriptValue{v, sv.visited}.marshal()
+					obj[strconv.Itoa(index+1)] = luaScriptValue{v, sv.visited}.marshal()
 					return
 				}
-				arr = append(arr, scriptValue{v, sv.visited}.marshal())
+				arr = append(arr, luaScriptValue{v, sv.visited}.marshal())
 				return
 			}
 			if obj == nil {
@@ -499,24 +500,24 @@ func (sv scriptValue) marshal() interface{} {
 					obj[strconv.Itoa(i+1)] = value
 				}
 			}
-			obj[k.String()] = scriptValue{v, sv.visited}.marshal()
+			obj[k.String()] = luaScriptValue{v, sv.visited}.marshal()
 		})
 		if obj != nil {
 			return obj
 		}
 		return arr
 	case *lua.LFunction:
-		panic(errScriptMarshalFunction)
+		panic(luaErrScriptMarshalFunction)
 	case lua.LChannel:
-		panic(errScriptMarshalChannel)
+		panic(luaErrScriptMarshalChannel)
 	case *lua.LState:
-		panic(errScriptMarshalState)
+		panic(luaErrScriptMarshalState)
 	case *lua.LUserData:
-		panic(errScriptMarshalUserData)
+		panic(luaErrScriptMarshalUserData)
 	}
 	return nil
 }
 
-func scriptValueMarshal(v lua.LValue) interface{} {
-	return scriptValue{v, make(map[*lua.LTable]bool)}.marshal()
+func luaScriptValueMarshal(v lua.LValue) interface{} {
+	return luaScriptValue{v, make(map[*lua.LTable]bool)}.marshal()
 }
