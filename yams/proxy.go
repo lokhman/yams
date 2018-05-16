@@ -7,9 +7,9 @@ import (
 )
 
 const (
-	ProxyHeaderStatus    = "x-yams-status"
-	ProxyHeaderRouteId   = "x-yams-route-id"
-	ProxyHeaderSessionId = "x-yams-session-id"
+	ProxyHeaderStatus    = "X-YAMS-Status"
+	ProxyHeaderRouteId   = "X-YAMS-Route-Id"
+	ProxyHeaderSessionId = "X-YAMS-Session-Id"
 
 	ProxyStatusError       = "error"
 	ProxyStatusProxy       = "proxy"

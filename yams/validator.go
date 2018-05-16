@@ -3,6 +3,7 @@ package yams
 import (
 	"net"
 	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -47,6 +48,12 @@ func (v *defaultValidator) lazyinit() {
 				return false
 			}
 			return true
+		})
+		v.validate.RegisterValidation("username", func(fl validator.FieldLevel) bool {
+			return regexp.MustCompile(`^[a-z][a-z0-9.]{2,31}$`).MatchString(fl.Field().String())
+		})
+		v.validate.RegisterValidation("acl", func(fl validator.FieldLevel) bool {
+			return regexp.MustCompile(`^[a-z]+(?::\d+)?$`).MatchString(fl.Field().String())
 		})
 	})
 }

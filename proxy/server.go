@@ -21,7 +21,6 @@ type handler struct{}
 
 func (s *handler) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	var r *model.Route
-	var err error
 
 	defer (func() {
 		if err := recover(); err != nil {
@@ -74,6 +73,7 @@ func (s *handler) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	var err error
 	switch r.Adapter {
 	case yams.AdapterLua:
 		err = adapter.NewLuaScript(r, rw, req, sid).Execute()

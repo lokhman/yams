@@ -14,19 +14,6 @@ const (
 	aclDeveloper = "developer"
 )
 
-const (
-	errCodeUnknown = (iota + 0xFF) & 0xFF
-	_              // errCodeUndefined
-	errCodeAuthNoHeader
-	errCodeAuthBadToken
-	errCodeAuthNoUser
-	errCodeAuthNoACL
-	errCodeBadCredentials
-	errCodeInvalidIdentifier
-	errCodeProfileHostExists
-	errCodeInvalidAdapter
-)
-
 var Server = &http.Server{
 	Addr:    yams.ConsoleAddr,
 	Handler: handler(),
@@ -53,6 +40,11 @@ func handler() http.Handler {
 	api.Use(api.Authentication)
 	api.GET("/auth/acl", api.AuthACLAction)
 	api.POST("/auth/refresh", api.AuthRefreshAction)
+	api.GET("/users", api.ACL( /* aclAdmin */ ), api.UsersAction)
+	api.POST("/users", api.ACL( /* aclAdmin*/ ), api.UsersCreateAction)
+	api.GET("/users/:id", api.ACL( /* aclAdmin */ ), api.UsersViewAction)
+	api.PUT("/users/:id", api.ACL( /* aclAdmin */ ), api.UsersUpdateAction)
+	api.DELETE("/users/:id", api.ACL( /* aclAdmin */ ), api.UsersDeleteAction)
 	api.GET("/profiles", api.ACL(aclManager, aclDeveloper), api.ProfilesAction)
 	api.POST("/profiles", api.ACL(aclManager), api.ProfilesCreateAction)
 	api.GET("/profiles/:id", api.ACL(aclManager, aclDeveloper), api.ProfilesViewAction)
@@ -64,6 +56,11 @@ func handler() http.Handler {
 	api.PUT("/routes/:id", api.ACL(aclDeveloper), api.RoutesUpdateAction)
 	api.DELETE("/routes/:id", api.ACL(aclDeveloper), api.RoutesDeleteAction)
 	api.PUT("/routes/:id/script", api.ACL(aclDeveloper), api.RoutesScriptAction)
+	api.POST("/routes/:id/position", api.ACL(aclDeveloper), api.RoutesPositionAction)
+	api.GET("/profiles/:id/assets", api.ACL(aclDeveloper), api.AssetsAction)
+	api.PUT("/profiles/:id/assets/*path", api.ACL(aclDeveloper), api.AssetsUploadAction)
+	api.GET("/profiles/:id/assets/*path", api.ACL(aclDeveloper), api.AssetsDownloadAction)
+	api.DELETE("/profiles/:id/assets/*path", api.ACL(aclDeveloper), api.AssetsDeleteAction)
 
 	return r
 }

@@ -401,6 +401,7 @@ func luaAssetCheck(l *lua.LState) *luaAsset {
 	return nil
 }
 
+// Writes asset data directly to Writer.
 func luaAssetLoad(w io.Writer, a *luaAsset) {
 	var data sql.RawBytes
 	rows, err := yams.DB.Query(`SELECT data FROM assets WHERE id = $1`, a.id)

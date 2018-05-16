@@ -7,7 +7,7 @@ import (
 )
 
 func ClientIP(r *http.Request) string {
-	ip := r.Header.Get("x-forwarded-for")
+	ip := r.Header.Get("X-Forwarded-For")
 	if index := strings.IndexByte(ip, ','); index >= 0 {
 		ip = ip[0:index]
 	}
@@ -15,7 +15,7 @@ func ClientIP(r *http.Request) string {
 	if ip != "" {
 		return ip
 	}
-	ip = strings.TrimSpace(r.Header.Get("x-real-ip"))
+	ip = strings.TrimSpace(r.Header.Get("X-Real-IP"))
 	if ip != "" {
 		return ip
 	}

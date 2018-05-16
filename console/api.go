@@ -18,6 +18,20 @@ import (
 	"gopkg.in/go-playground/validator.v9"
 )
 
+const (
+	errCodeUnknown = (iota + 0xFF) & 0xFF
+	_              // errCodeUndefined
+	errCodeAuthNoHeader
+	errCodeAuthBadToken
+	errCodeAuthNoUser
+	errCodeAuthFailedACL
+	errCodeBadCredentials
+	errCodeInvalidIdentifier
+	errCodeUsernameExists
+	errCodeProfileHostExists
+	errCodeInvalidAdapter
+)
+
 type jwtClaims struct {
 	jwt.StandardClaims
 	Id int `json:"id"`
@@ -107,19 +121,65 @@ func (_ *hAPI) token(claims *jwtClaims) string {
 	return token
 }
 
-func (h *hAPI) checkProfileAccess(c *gin.Context, id int) bool {
-	var aclId interface{}
+func (h *hAPI) checkUser(c *gin.Context, id int, checkSelf bool) bool {
 	if id == 0 {
-		goto deny
+		h.notFound(c, errCodeInvalidIdentifier, nil)
+		return false
 	}
-	aclId = c.MustGet("acl_id")
-	if aclId != nil && !yams.InIntSlice(aclId.([]int), id) {
-		goto deny
+	if checkSelf && id == c.MustGet("jwt").(*jwtClaims).Id {
+		h.forbidden(c, errCodeInvalidIdentifier, nil)
+		return false
+	}
+	q := qb.Select("id").From("users").Where("id = ?", id)
+	if err := q.Scan(&id); err != nil {
+		if err == sql.ErrNoRows {
+			h.notFound(c, errCodeInvalidIdentifier, nil)
+			return false
+		}
+		panic(err)
 	}
 	return true
-deny:
-	h.notFound(c, errCodeInvalidIdentifier, nil)
-	return false
+}
+
+func (h *hAPI) checkProfileAccess(c *gin.Context, id int) bool {
+	if id == 0 {
+		h.notFound(c, errCodeInvalidIdentifier, nil)
+		return false
+	}
+	q := qb.Select("id").From("profiles").Where("id = ?", id)
+	if err := q.Scan(&id); err != nil {
+		if err == sql.ErrNoRows {
+			h.notFound(c, errCodeInvalidIdentifier, nil)
+			return false
+		}
+		panic(err)
+	}
+	if aclId := c.MustGet("acl_id"); aclId != nil && !yams.InIntSlice(aclId.([]int), id) {
+		h.forbidden(c, errCodeAuthFailedACL, nil)
+		return false
+	}
+	return true
+}
+
+func (h *hAPI) checkRouteAccess(c *gin.Context, id int) bool {
+	if id == 0 {
+		h.notFound(c, errCodeInvalidIdentifier, nil)
+		return false
+	}
+	var pid int
+	q := qb.Select("profile_id").From("routes").Where("id = ?", id)
+	if err := q.Scan(&pid); err != nil {
+		if err == sql.ErrNoRows {
+			h.notFound(c, errCodeInvalidIdentifier, nil)
+			return false
+		}
+		panic(err)
+	}
+	if aclId := c.MustGet("acl_id"); aclId != nil && !yams.InIntSlice(aclId.([]int), pid) {
+		h.forbidden(c, errCodeAuthFailedACL, nil)
+		return false
+	}
+	return true
 }
 
 func (h *hAPI) Authentication(c *gin.Context) {
@@ -141,39 +201,38 @@ func (h *hAPI) Authentication(c *gin.Context) {
 	}
 	c.Set("jwt", claims)
 
-	var aclList pq.StringArray
-	q := qb.Select("acl").From("users").Where("id = ?", claims.Id)
-	if err = q.Scan(&aclList); err != nil {
+	var acl []string
+	q := qb.Update("users").Set("last_auth_at", sqrl.Expr("now()")).Where("id = ?", claims.Id).Suffix("RETURNING acl")
+	if err = q.Scan(pq.Array(&acl)); err != nil {
 		if err == sql.ErrNoRows {
 			h.unauthorized(c, errCodeAuthNoUser, nil)
 			return
 		}
 		panic(err)
 	}
-	aclMap := make(map[string][]int)
-	for _, acl := range aclList {
-		r := strings.SplitN(acl, ":", 2)
-		if v, ok := aclMap[r[0]]; len(r) == 2 {
-			vc, _ := strconv.Atoi(r[1])
-			aclMap[r[0]] = append(v, vc)
-		} else if !ok {
-			aclMap[r[0]] = v
-		}
-	}
-	c.Set("acl", aclMap)
+	c.Set("acl", acl)
 	c.Set("acl_id", nil)
 	c.Next()
 }
 
 func (h *hAPI) ACL(ns ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		acl := c.MustGet("acl").(map[string][]int)
-		if _, ok := acl[aclAdmin]; ok {
+		aclMap := make(map[string][]int)
+		for _, acl := range c.MustGet("acl").([]string) {
+			r := strings.SplitN(acl, ":", 2)
+			if v, ok := aclMap[r[0]]; len(r) == 2 {
+				vc, _ := strconv.Atoi(r[1])
+				aclMap[r[0]] = append(v, vc)
+			} else if !ok {
+				aclMap[r[0]] = v
+			}
+		}
+		if _, ok := aclMap[aclAdmin]; ok {
 			c.Next()
 			return
 		}
 		for _, ns := range ns {
-			if id, ok := acl[ns]; ok {
+			if id, ok := aclMap[ns]; ok {
 				if len(id) > 0 {
 					c.Set("acl_id", id)
 				}
@@ -181,7 +240,7 @@ func (h *hAPI) ACL(ns ...string) gin.HandlerFunc {
 				return
 			}
 		}
-		h.forbidden(c, errCodeAuthNoACL, nil)
+		h.forbidden(c, errCodeAuthFailedACL, nil)
 	}
 }
 
@@ -193,8 +252,8 @@ func (h *hAPI) IndexAction(c *gin.Context) {
 
 func (h *hAPI) AuthAction(c *gin.Context) {
 	var in struct {
-		Username string `form:"username" json:"username" binding:"required"`
-		Password string `form:"password" json:"password" binding:"required"`
+		Username string `form:"username" json:"username" binding:"required,username"`
+		Password string `form:"password" json:"password" binding:"required,min=3,max=72"`
 	}
 	if !h.bind(c, &in) {
 		return
@@ -213,18 +272,144 @@ func (h *hAPI) AuthAction(c *gin.Context) {
 }
 
 func (h *hAPI) AuthACLAction(c *gin.Context) {
-	h.ok(c, c.MustGet("acl").(map[string][]int))
+	h.ok(c, c.MustGet("acl").([]string))
 }
 
 func (h *hAPI) AuthRefreshAction(c *gin.Context) {
 	h.ok(c, gin.H{"token": h.token(c.MustGet("jwt").(*jwtClaims))})
 }
 
+type outUser struct {
+	Id         int            `json:"id"`
+	Username   string         `json:"username"`
+	ACL        pq.StringArray `json:"acl"`
+	LastAuthAt *time.Time     `json:"last_auth_at"`
+	CreatedAt  time.Time      `json:"created_at"`
+}
+
+func (h *hAPI) UsersAction(c *gin.Context) {
+	q := qb.Select("id", "username", "acl", "last_auth_at", "created_at").From("users").OrderBy("username")
+	rows, err := q.Query()
+	defer rows.Close()
+
+	rs := make([]outUser, 0)
+	for rows.Next() {
+		var out outUser
+		if err = rows.Scan(&out.Id, &out.Username, &out.ACL, &out.LastAuthAt, &out.CreatedAt); err != nil {
+			panic(err)
+		}
+		rs = append(rs, out)
+	}
+	if err = rows.Err(); err != nil {
+		panic(err)
+	}
+	h.ok(c, rs)
+}
+
+func (h *hAPI) UsersViewAction(c *gin.Context) {
+	id := h.paramInt(c, "id")
+	if !h.checkUser(c, id, false) {
+		return
+	}
+
+	var out outUser
+	q := qb.Select("id", "username", "acl", "last_auth_at", "created_at").From("users").Where("id = ?", id)
+	if err := q.Scan(&out.Id, &out.Username, &out.ACL, &out.LastAuthAt, &out.CreatedAt); err != nil {
+		panic(err)
+	}
+	h.ok(c, out)
+}
+
+type inUser struct {
+	Username string   `form:"username" json:"username" binding:"required,username"`
+	Password string   `form:"password" json:"password" binding:"omitempty,min=3,max=72"`
+	ACL      []string `form:"acl" json:"acl" binding:"unique,dive,required,max=32,acl"`
+}
+
+func (h *hAPI) UsersCreateAction(c *gin.Context) {
+	var in inUser
+	if !h.bind(c, &in) {
+		return
+	}
+
+	q1 := qb.Select("TRUE").From("users").Where("username = lower(?)", in.Username)
+	if err := q1.Scan(new(bool)); err == nil {
+		h.conflict(c, errCodeUsernameExists, nil)
+		return
+	} else if err != sql.ErrNoRows {
+		panic(err)
+	}
+
+	var out struct {
+		Id       int    `json:"id"`
+		Password string `json:"password,omitempty"`
+	}
+	if in.Password == "" {
+		in.Password = yams.RandString(8)
+		out.Password = in.Password
+	}
+
+	q2 := qb.Insert("users").SetMap(map[string]interface{}{
+		"username": in.Username,
+		"password": sqrl.Expr("crypt(?, gen_salt('bf'))", in.Password),
+		"acl":      pq.Array(in.ACL),
+	}).Suffix("RETURNING id")
+	if err := q2.Scan(&out.Id); err != nil {
+		panic(err)
+	}
+	h.ok(c, out)
+}
+
+func (h *hAPI) UsersUpdateAction(c *gin.Context) {
+	id := h.paramInt(c, "id")
+	if !h.checkUser(c, id, false) {
+		return
+	}
+
+	var in inUser
+	if !h.bind(c, &in) {
+		return
+	}
+
+	q1 := qb.Select("TRUE").From("users").Where("id <> ? AND username = lower(?)", id, in.Username)
+	if err := q1.Scan(new(bool)); err == nil {
+		h.conflict(c, errCodeUsernameExists, nil)
+		return
+	} else if err != sql.ErrNoRows {
+		panic(err)
+	}
+
+	q2 := qb.Update("users").SetMap(map[string]interface{}{
+		"username": in.Username,
+		"acl":      pq.Array(in.ACL),
+	}).Where("id = ?", id)
+	if in.Password != "" {
+		q2.Set("password", sqrl.Expr("crypt(?, gen_salt('bf'))", in.Password))
+	}
+	if _, err := q2.Exec(); err != nil {
+		panic(err)
+	}
+	h.ok(c, nil)
+}
+
+func (h *hAPI) UsersDeleteAction(c *gin.Context) {
+	id := h.paramInt(c, "id")
+	if !h.checkUser(c, id, true) {
+		return
+	}
+
+	q := qb.Delete("users").Where("id = ?", id)
+	if _, err := q.Exec(); err != nil {
+		panic(err)
+	}
+	h.ok(c, nil)
+}
+
 type outProfile struct {
 	Id           int            `json:"id"`
 	Name         string         `json:"name"`
 	Hosts        pq.StringArray `json:"hosts"`
-	Backend      *string        `json:"backend,omitempty"`
+	Backend      *string        `json:"backend"`
 	Debug        bool           `json:"debug"`
 	VarsLifetime int            `json:"vars_lifetime"`
 	CreatedAt    time.Time      `json:"created_at"`
@@ -261,10 +446,6 @@ func (h *hAPI) ProfilesViewAction(c *gin.Context) {
 	var out outProfile
 	q := qb.Select("id", "name", "hosts", "backend", "debug", "vars_lifetime", "created_at").From("profiles").Where("id = ?", id)
 	if err := q.Scan(&out.Id, &out.Name, &out.Hosts, &out.Backend, &out.Debug, &out.VarsLifetime, &out.CreatedAt); err != nil {
-		if err == sql.ErrNoRows {
-			h.notFound(c, errCodeInvalidIdentifier, nil)
-			return
-		}
 		panic(err)
 	}
 	h.ok(c, out)
@@ -284,14 +465,12 @@ func (h *hAPI) ProfilesCreateAction(c *gin.Context) {
 		return
 	}
 
-	var exists bool
-	q1 := qb.Select("COUNT(*) > 0").From("profiles").Where("hosts && ?", pq.Array(in.Hosts))
-	if err := q1.Scan(&exists); err != nil {
-		panic(err)
-	}
-	if exists {
+	q1 := qb.Select("TRUE").From("profiles").Where("hosts && ?", pq.Array(in.Hosts))
+	if err := q1.Scan(new(bool)); err == nil {
 		h.conflict(c, errCodeProfileHostExists, nil)
 		return
+	} else if err != sql.ErrNoRows {
+		panic(err)
 	}
 
 	var id int
@@ -301,7 +480,7 @@ func (h *hAPI) ProfilesCreateAction(c *gin.Context) {
 		"backend":       in.Backend,
 		"debug":         in.Debug,
 		"vars_lifetime": in.VarsLifetime,
-	}).Suffix("RETURNING TRUE")
+	}).Suffix("RETURNING id")
 	if err := q2.Scan(&id); err != nil {
 		panic(err)
 	}
@@ -319,14 +498,12 @@ func (h *hAPI) ProfilesUpdateAction(c *gin.Context) {
 		return
 	}
 
-	var exists bool
-	q1 := qb.Select("COUNT(*) > 0").From("profiles").Where("id <> ? AND hosts && ?", id, pq.Array(in.Hosts))
-	if err := q1.Scan(&exists); err != nil {
-		panic(err)
-	}
-	if exists {
+	q1 := qb.Select("TRUE").From("profiles").Where("id <> ? AND hosts && ?", id, pq.Array(in.Hosts))
+	if err := q1.Scan(new(bool)); err == nil {
 		h.conflict(c, errCodeProfileHostExists, nil)
 		return
+	} else if err != sql.ErrNoRows {
+		panic(err)
 	}
 
 	q2 := qb.Update("profiles").SetMap(map[string]interface{}{
@@ -335,13 +512,9 @@ func (h *hAPI) ProfilesUpdateAction(c *gin.Context) {
 		"backend":       in.Backend,
 		"debug":         in.Debug,
 		"vars_lifetime": in.VarsLifetime,
-	}).Where("id = ?", id).Suffix("RETURNING TRUE")
-	if err := q2.Scan(&exists); err != nil && err != sql.ErrNoRows {
+	}).Where("id = ?", id)
+	if _, err := q2.Exec(); err != nil {
 		panic(err)
-	}
-	if !exists {
-		h.notFound(c, errCodeInvalidIdentifier, nil)
-		return
 	}
 	h.ok(c, nil)
 }
@@ -352,14 +525,9 @@ func (h *hAPI) ProfilesDeleteAction(c *gin.Context) {
 		return
 	}
 
-	var exists bool
-	q := qb.Delete("profiles").Where("id = ?", id).Suffix("RETURNING TRUE")
-	if err := q.Scan(&exists); err != nil && err != sql.ErrNoRows {
+	q := qb.Delete("profiles").Where("id = ?", id)
+	if _, err := q.Exec(); err != nil {
 		panic(err)
-	}
-	if !exists {
-		h.notFound(c, errCodeInvalidIdentifier, nil)
-		return
 	}
 	h.ok(c, nil)
 }
@@ -398,16 +566,14 @@ func (h *hAPI) RoutesAction(c *gin.Context) {
 }
 
 func (h *hAPI) RoutesViewAction(c *gin.Context) {
-	var out outRoute
-	q := qb.Select("id", "uuid", "methods", "path", "timeout", "hint").From("routes").Where("id = ?", h.paramInt(c, "id"))
-	if aclId := c.MustGet("acl_id"); aclId != nil {
-		q.Where(sqrl.Eq{"profile_id": aclId.([]int)})
+	id := h.paramInt(c, "id")
+	if !h.checkRouteAccess(c, id) {
+		return
 	}
+
+	var out outRoute
+	q := qb.Select("id", "uuid", "methods", "path", "timeout", "hint").From("routes").Where("id = ?", id)
 	if err := q.Scan(&out.Id, &out.Uuid, &out.Methods, &out.Path, &out.Timeout, &out.Hint); err != nil {
-		if err == sql.ErrNoRows {
-			h.notFound(c, errCodeInvalidIdentifier, nil)
-			return
-		}
 		panic(err)
 	}
 	h.ok(c, out)
@@ -447,48 +613,34 @@ func (h *hAPI) RoutesCreateAction(c *gin.Context) {
 }
 
 func (h *hAPI) RoutesUpdateAction(c *gin.Context) {
+	id := h.paramInt(c, "id")
+	if !h.checkRouteAccess(c, id) {
+		return
+	}
+
 	var in inRoute
 	if !h.bind(c, &in) {
 		return
 	}
 
-	var exists bool
 	q := qb.Update("routes").SetMap(map[string]interface{}{
 		"methods": pq.Array(in.Methods),
 		"path":    in.Path,
 		"timeout": in.Timeout,
 		"hint":    in.Hint,
-	}).Where("id = ?", h.paramInt(c, "id")).Suffix("RETURNING TRUE")
-	if aclId := c.MustGet("acl_id"); aclId != nil {
-		q.Where(sqrl.Eq{"profile_id": aclId.([]int)})
-	}
-	if err := q.Scan(&exists); err != nil && err != sql.ErrNoRows {
+	}).Where("id = ?", id)
+	if _, err := q.Exec(); err != nil {
 		panic(err)
-	}
-	if !exists {
-		h.notFound(c, errCodeInvalidIdentifier, nil)
-		return
-	}
-	h.ok(c, nil)
-}
-
-func (h *hAPI) RoutesDeleteAction(c *gin.Context) {
-	var exists bool
-	q := qb.Delete("routes").Where("id = ?", h.paramInt(c, "id")).Suffix("RETURNING TRUE")
-	if aclId := c.MustGet("acl_id"); aclId != nil {
-		q.Where(sqrl.Eq{"profile_id": aclId.([]int)})
-	}
-	if err := q.Scan(&exists); err != nil && err != sql.ErrNoRows {
-		panic(err)
-	}
-	if !exists {
-		h.notFound(c, errCodeInvalidIdentifier, nil)
-		return
 	}
 	h.ok(c, nil)
 }
 
 func (h *hAPI) RoutesScriptAction(c *gin.Context) {
+	id := h.paramInt(c, "id")
+	if !h.checkRouteAccess(c, id) {
+		return
+	}
+
 	adapter, ok := yams.Adapters[c.ContentType()]
 	if !ok {
 		h.unsupportedMediaType(c, errCodeInvalidAdapter, nil)
@@ -505,20 +657,161 @@ func (h *hAPI) RoutesScriptAction(c *gin.Context) {
 		panic(err)
 	}
 
-	var exists bool
 	q := qb.Update("routes").SetMap(map[string]interface{}{
 		"adapter": adapter,
 		"script":  buf,
-	}).Where("id = ?", h.paramInt(c, "id")).Suffix("RETURNING TRUE")
-	if aclId := c.MustGet("acl_id"); aclId != nil {
-		q.Where(sqrl.Eq{"profile_id": aclId.([]int)})
-	}
-	if err := q.Scan(&exists); err != nil && err != sql.ErrNoRows {
+	}).Where("id = ?", id)
+	if _, err := q.Exec(); err != nil {
 		panic(err)
 	}
-	if !exists {
+	h.ok(c, nil)
+}
+
+func (h *hAPI) RoutesPositionAction(c *gin.Context) {
+	id := h.paramInt(c, "id")
+	if !h.checkRouteAccess(c, id) {
+		return
+	}
+
+	var in struct {
+		Position int `form:"position" json:"position" binding:"omitempty,min=0"`
+	}
+	if !h.bind(c, &in) {
+		return
+	}
+
+	q := qb.Update("routes").Set("position", in.Position).Where("id = ?", id)
+	if _, err := q.Exec(); err != nil {
+		panic(err)
+	}
+	h.ok(c, nil)
+}
+
+func (h *hAPI) RoutesDeleteAction(c *gin.Context) {
+	id := h.paramInt(c, "id")
+	if !h.checkRouteAccess(c, id) {
+		return
+	}
+
+	q := qb.Delete("routes").Where("id = ?", id)
+	if _, err := q.Exec(); err != nil {
+		panic(err)
+	}
+	h.ok(c, nil)
+}
+
+type outAsset struct {
+	Id        int       `json:"id"`
+	Path      string    `json:"path"`
+	MimeType  string    `json:"mime_type"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (h *hAPI) AssetsAction(c *gin.Context) {
+	pid := h.paramInt(c, "id")
+	if !h.checkProfileAccess(c, pid) {
+		return
+	}
+
+	q := qb.Select("id", "path", "mime_type", "created_at").From("assets").Where("profile_id = ?", pid).OrderBy("path")
+	rows, err := q.Query()
+	defer rows.Close()
+
+	rs := make([]outAsset, 0)
+	for rows.Next() {
+		var out outAsset
+		if err = rows.Scan(&out.Id, &out.Path, &out.MimeType, &out.CreatedAt); err != nil {
+			panic(err)
+		}
+		rs = append(rs, out)
+	}
+	if err = rows.Err(); err != nil {
+		panic(err)
+	}
+	h.ok(c, rs)
+}
+
+func (h *hAPI) AssetsUploadAction(c *gin.Context) {
+	pid := h.paramInt(c, "id")
+	if !h.checkProfileAccess(c, pid) {
+		return
+	}
+
+	mimeType := c.GetHeader("Content-Type")
+	if mimeType == "" {
+		h.unsupportedMediaType(c, errCodeUnknown, nil)
+		return
+	}
+
+	if c.Request.ContentLength > yams.MaxAssetSize {
+		h.requestEntityTooLarge(c, errCodeUnknown, nil)
+		return
+	}
+
+	buf, err := ioutil.ReadAll(c.Request.Body)
+	if err != nil {
+		panic(err)
+	}
+
+	values := map[string]interface{}{
+		"profile_id": pid,
+		"data":       buf,
+		"mime_type":  mimeType,
+	}
+	p := strings.Trim(c.Param("path"), "/")
+	if p != "" {
+		values["path"] = p
+	}
+
+	q := qb.Insert("assets").SetMap(values)
+	q.Suffix(`ON CONFLICT (profile_id, path) DO UPDATE SET data = EXCLUDED.data, mime_type = EXCLUDED.mime_type, created_at = DEFAULT RETURNING path`)
+	if err := q.Scan(&p); err != nil {
+		panic(err)
+	}
+	h.ok(c, gin.H{"path": p})
+}
+
+func (h *hAPI) AssetsDownloadAction(c *gin.Context) {
+	pid := h.paramInt(c, "id")
+	if !h.checkProfileAccess(c, pid) {
+		return
+	}
+
+	var data sql.RawBytes
+	var mimeType string
+	p := c.Param("path")[1:]
+
+	// Writes asset data directly to Writer.
+	q := qb.Select("data", "mime_type").From("assets").Where("profile_id = ? AND path = ?", pid, p)
+	rows, err := q.Query()
+	if err != nil {
+		panic(err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
 		h.notFound(c, errCodeInvalidIdentifier, nil)
 		return
+	}
+	if err = rows.Scan(&data, &mimeType); err != nil {
+		panic(err)
+	}
+	c.Data(200, mimeType, data)
+}
+
+func (h *hAPI) AssetsDeleteAction(c *gin.Context) {
+	pid := h.paramInt(c, "id")
+	if !h.checkProfileAccess(c, pid) {
+		return
+	}
+
+	p := c.Param("path")[1:]
+	q := qb.Delete("assets").Where("profile_id = ? AND path = ?", pid, p).Suffix("RETURNING TRUE")
+	if err := q.Scan(new(bool)); err != nil {
+		if err == sql.ErrNoRows {
+			h.notFound(c, errCodeInvalidIdentifier, nil)
+			return
+		}
+		panic(err)
 	}
 	h.ok(c, nil)
 }
