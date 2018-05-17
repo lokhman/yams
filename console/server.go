@@ -26,9 +26,13 @@ func handler() http.Handler {
 	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery())
 
+	// Console
 	r.GET("/", func(c *gin.Context) {
 		c.String(200, "test")
 	})
+
+	// Static
+	r.StaticFS("/static", gin.Dir("static", false))
 
 	// API public
 	api := &hAPI{r.Group("/api")}

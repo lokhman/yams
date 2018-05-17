@@ -41,7 +41,7 @@ func (pe proxyError) write(w http.ResponseWriter) {
 	w.Header().Set(yams.ProxyHeaderStatus, yams.ProxyStatusError)
 	w.WriteHeader(pe.status)
 
-	t, err := template.ParseFiles("public/error.html")
+	t, err := template.ParseFiles("templates/proxy/error.html")
 	if err != nil {
 		panic(err)
 	}
