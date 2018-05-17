@@ -4,7 +4,18 @@ const (
 	AdapterLua = "lua"
 )
 
-var Adapters = map[string]string{
+type adapterMap map[string]string
+
+func (am adapterMap) GetMimeType(adapter string) string {
+	for mimeType, a := range am {
+		if a == adapter {
+			return mimeType
+		}
+	}
+	return ""
+}
+
+var Adapters = adapterMap{
 	"application/x-lua": AdapterLua,
 }
 

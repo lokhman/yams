@@ -635,7 +635,28 @@ func (h *hAPI) RoutesUpdateAction(c *gin.Context) {
 	h.ok(c, nil)
 }
 
-func (h *hAPI) RoutesScriptAction(c *gin.Context) {
+func (h *hAPI) RoutesScriptViewAction(c *gin.Context) {
+	id := h.paramInt(c, "id")
+	if !h.checkRouteAccess(c, id) {
+		return
+	}
+
+	var adapter string
+	var script sql.RawBytes
+	q := qb.Select("adapter", "script").From("routes").Where("id = ?", id)
+	rows, err := q.Query()
+	if err != nil {
+		panic(err)
+	}
+	defer rows.Close()
+	rows.Next()
+	if err = rows.Scan(&adapter, &script); err != nil {
+		panic(err)
+	}
+	c.Data(200, yams.Adapters.GetMimeType(adapter), script)
+}
+
+func (h *hAPI) RoutesScriptUpdateAction(c *gin.Context) {
 	id := h.paramInt(c, "id")
 	if !h.checkRouteAccess(c, id) {
 		return
