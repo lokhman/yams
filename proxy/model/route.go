@@ -9,14 +9,15 @@ import (
 )
 
 type Route struct {
-	Profile *Profile
-	UUID    string
-	Method  string
-	Path    string
-	Adapter string
-	Script  string
-	Timeout int
-	Args    map[string]string
+	Profile   *Profile
+	UUID      string
+	Method    string
+	Path      string
+	Adapter   string
+	Script    string
+	Timeout   int
+	IsEnabled bool
+	Args      map[string]string
 }
 
 func (r Route) Debug() [][2]string {
@@ -31,8 +32,8 @@ func MatchRoute(p *Profile, method, path string) *Route {
 	var pk, pv pq.StringArray
 	r := &Route{Profile: p, Method: method}
 
-	q := `SELECT uuid, path, path_args, regexp_matches($3, path_re), adapter, script, timeout FROM routes WHERE profile_id = $1 AND methods && $2 AND $3 ~ path_re ORDER BY position LIMIT 1`
-	if err := yams.DB.QueryRow(q, p.Id, pq.StringArray{method, "*"}, path).Scan(&r.UUID, &r.Path, &pk, &pv, &r.Adapter, &r.Script, &r.Timeout); err != nil {
+	q := `SELECT uuid, path, path_args, regexp_matches($3, path_re), adapter, script, timeout, is_enabled FROM routes WHERE profile_id = $1 AND methods && $2 AND $3 ~ path_re ORDER BY position LIMIT 1`
+	if err := yams.DB.QueryRow(q, p.Id, pq.StringArray{method, "*"}, path).Scan(&r.UUID, &r.Path, &pk, &pv, &r.Adapter, &r.Script, &r.Timeout, &r.IsEnabled); err != nil {
 		if err == sql.ErrNoRows {
 			return nil
 		}
