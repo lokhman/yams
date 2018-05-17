@@ -4,8 +4,8 @@ import (
 	"database/sql"
 	"log"
 
+	"github.com/elgris/sqrl"
 	_ "github.com/lib/pq"
-	"github.com/lokhman/sqrl"
 )
 
 var DB *sql.DB

@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
+	"github.com/elgris/sqrl"
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
 	"github.com/lib/pq"
-	"github.com/lokhman/sqrl"
 	"github.com/lokhman/yams/yams"
 	"gopkg.in/go-playground/validator.v9"
 )
