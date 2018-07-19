@@ -33,7 +33,7 @@ func perror(w http.ResponseWriter, status int, str string, r *model.Route, skip 
 }
 
 func (pe proxyError) write(w http.ResponseWriter) {
-	if pe.Route != nil && !pe.Route.Profile.Debug {
+	if pe.Route != nil && !pe.Route.Profile.IsDebug {
 		http.Error(w, fmt.Sprintf("%d %s", pe.status, http.StatusText(pe.status)), pe.status)
 		return
 	}
@@ -41,7 +41,7 @@ func (pe proxyError) write(w http.ResponseWriter) {
 	w.Header().Set(yams.ProxyHeaderStatus, yams.ProxyStatusError)
 	w.WriteHeader(pe.status)
 
-	t, err := template.ParseFiles("templates/proxy/error.html")
+	t, err := template.ParseFiles("public/proxy/error.html")
 	if err != nil {
 		panic(err)
 	}

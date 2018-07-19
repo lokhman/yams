@@ -40,7 +40,7 @@ func (s *handler) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 			perror(rw, http.StatusNotFound, fmt.Sprintf(`yams: no route found for path "%s"`, req.URL.Path), nil, skipError)
 			return
 		}
-		yams.ReverseProxy(rw, req, *p.Backend, p.Debug)
+		yams.ReverseProxy(rw, req, *p.Backend, p.IsDebug)
 		return
 	}
 
@@ -52,7 +52,7 @@ func (s *handler) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		sid = yams.RandString(sidLength)
 	}
 
-	if r.Profile.Debug {
+	if r.Profile.IsDebug {
 		rw.Header().Set(yams.ProxyHeaderStatus, yams.ProxyStatusIntercepted)
 		rw.Header().Set(yams.ProxyHeaderRouteId, r.UUID)
 		rw.Header().Set(yams.ProxyHeaderSessionId, sid)

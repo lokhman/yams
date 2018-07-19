@@ -372,7 +372,7 @@ func (s *luaScript) fnPass(l *lua.LState) int {
 	} else {
 		target = l.CheckString(1)
 	}
-	yams.ReverseProxy(s.rw, s.req, target, s.route.Profile.Debug)
+	yams.ReverseProxy(s.rw, s.req, target, s.route.Profile.IsDebug)
 	s.status, s.wbuf = 0, nil
 	l.Exit()
 	return 0
