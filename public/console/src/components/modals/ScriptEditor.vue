@@ -64,8 +64,9 @@
       },
       doSave () {
         const config = {headers: {'content-type': this.contentType}}
+        const script = this.script.replace(/[ \t]+$/gm, '')
 
-        return this.$http.put(`/api/routes/${this.route.id}/script`, this.script, config)
+        return this.$http.put(`/api/routes/${this.route.id}/script`, script, config)
           .then(() => {
             this.$root.dirty = false
             this.route.script_size = this.size
