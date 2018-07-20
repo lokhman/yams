@@ -32,6 +32,7 @@ func handler() http.Handler {
 
 	// Static
 	r.StaticFS("/static", gin.Dir("static", false))
+	r.StaticFile("/favicon.ico", "./static/favicon.ico")
 
 	// API public
 	api := &hAPI{r.Group("/api")}
