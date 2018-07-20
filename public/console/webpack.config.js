@@ -47,8 +47,8 @@ module.exports = (_, argv) => {
     plugins: [
       new VueLoaderPlugin(),
       new MiniCssExtractPlugin({
-        filename: 'css/[name].[hash].css',
-        chunkFilename: 'css/[name].[id].[hash].css'
+        filename: 'static/css/[name].[hash].css',
+        chunkFilename: 'static/css/[name].[id].[hash].css'
       }),
       new HtmlWebpackPlugin({
         template: resolve('index.html'),
@@ -61,7 +61,9 @@ module.exports = (_, argv) => {
         chunksSortMode: 'dependency'
       }),
       new FileManagerPlugin({
-        onStart: {delete: [`${staticPath}/js/`]},
+        onStart: {
+          delete: [`${staticPath}/js/`, `${staticPath}/css/`]
+        },
         onEnd: {
           copy: [{source: `${distPath}/static/`, destination: staticPath}],
           delete: [`${distPath}/static/`]
