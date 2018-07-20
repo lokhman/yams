@@ -63,7 +63,9 @@
       this.editor.container.remove()
     },
     mounted () {
+      const vm = this
       const editor = ace.edit(this.$el)
+
       editor.$blockScrolling = Infinity
       editor.setPrintMarginColumn(100)
       editor.setValue(this.value, 1)
@@ -73,6 +75,14 @@
         const value = editor.getValue()
         this.$emit('input', value)
         this.backup = value
+      })
+
+      editor.commands.addCommand({
+        name: 'save',
+        bindKey: {win: 'Ctrl-S', mac: 'Cmd-S'},
+        exec (editor) {
+          vm.$emit('save', editor.getValue())
+        }
       })
 
       this.$emit('init', editor)

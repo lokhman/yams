@@ -1,7 +1,7 @@
 <template>
   <modal ref="modal" :title="`Script Editor (${mode})`" size="large" data-backdrop="static" data-keyboard="false" @hide="$root.onModalHide">
     <div v-if="isScriptLarge()" class="alert alert-danger" role="alert">Script is too long &mdash; {{ formatNumber(size) }} bytes!</div>
-    <editor v-model="script" :mode="mode" id="yams-editor"></editor>
+    <editor v-model="script" :mode="mode" id="yams-editor" @save="onSaveClick()"></editor>
     <div class="d-flex justify-content-between">
       <code>{{ route.path || '...' }}</code>
       <small>{{ contentType }}</small>
@@ -62,15 +62,13 @@
             this.$root.stopLoading()
           })
       },
-      save (callback) {
+      doSave () {
         const config = {headers: {'content-type': this.contentType}}
-        this.$http.put(`/api/routes/${this.route.id}/script`, this.script, config)
+
+        return this.$http.put(`/api/routes/${this.route.id}/script`, this.script, config)
           .then(() => {
             this.$root.dirty = false
             this.route.script_size = this.size
-            if (typeof callback === 'function') {
-              callback()
-            }
           })
           .catch(this.$root.httpError)
       },
@@ -78,10 +76,10 @@
         return this.size > 8 << 20
       },
       onSaveClick () {
-        this.save()
+        this.doSave()
       },
       onSaveCloseClick () {
-        this.save(() => {
+        this.doSave().then(() => {
           this.$parent.doLoadRoutes()
           this.$refs.modal.hide()
         })
