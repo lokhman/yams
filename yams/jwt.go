@@ -9,8 +9,8 @@ import (
 
 type JWTClaims struct {
 	jwt.StandardClaims
-	Id int `json:"id"`
 
+	Id       int    `json:"id"`
 	Username string `json:"-"`
 	Role     string `json:"-"`
 }

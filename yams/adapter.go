@@ -21,4 +21,5 @@ var Adapters = adapterMap{
 
 const DefaultScript = `local yams = require("yams")
 
-yams.write("YAMS Route: " .. yams.routeid)`
+yams.write("YAMS Route: " .. yams.routeid)
+`
