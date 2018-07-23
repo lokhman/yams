@@ -1,7 +1,7 @@
 <template>
   <modal ref="modal" :title="`Script Editor (${mode})`" size="large" data-backdrop="static" data-keyboard="false" @hide="$root.onModalHide">
     <div v-if="isScriptLarge()" class="alert alert-danger" role="alert">Script is too long &mdash; {{ formatNumber(size) }} bytes!</div>
-    <editor v-model="script" :mode="mode" id="yams-editor" @save="onSaveClick()"></editor>
+    <editor v-model="script" :mode="mode" id="yams-editor" @save="onSaveClick()" />
     <div class="d-flex justify-content-between">
       <code>{{ route.path || '...' }}</code>
       <small>{{ contentType }}</small>
@@ -90,7 +90,7 @@
 </script>
 
 <style lang="scss" scoped>
-  #yams-editor {
+  #yams-editor:not(.yams-fullscreen) {
     position: relative;
     height: 480px;
     border: 1px solid #999;
