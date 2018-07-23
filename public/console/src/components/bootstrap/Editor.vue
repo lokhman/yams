@@ -71,6 +71,7 @@
       editor.$blockScrolling = Infinity
       editor.setPrintMarginColumn(100)
       editor.setValue(this.value, 1)
+      editor.setOption('tabSize', 2)
       this.backup = this.value
 
       editor.on('change', () => {
