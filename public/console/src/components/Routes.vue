@@ -44,7 +44,7 @@
               </span>
             </td>
             <td>
-              <button type="button" class="btn btn-xs btn-outline-primary" style="width: 100px" @click="onScriptClick(route)">
+              <button type="button" class="btn btn-xs btn-outline-primary" style="min-width: 130px" @click="onScriptClick(route)">
                 <i class="fas fa-code" /> {{ route.adapter }}
                 <code class="badge badge-primary">{{ formatFileSize(route.script_size, '') }}</code>
               </button>
