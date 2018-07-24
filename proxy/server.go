@@ -72,6 +72,11 @@ func (s *handler) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	if req.URL.Scheme == "" {
+		// if scheme is passed by the proxy
+		req.URL.Scheme = req.Header.Get("X-Scheme")
+	}
+
 	var err error
 	switch r.Adapter {
 	case yams.AdapterLua:
