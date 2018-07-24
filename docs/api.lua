@@ -25,7 +25,7 @@ yams.write([=[
         <li><a href="#yams.ip">yams.ip</a></li>
         <li><a href="#yams.sessionid">yams.sessionid</a></li>
         <li><a href="#yams.form">yams.form</a></li>
-        <li><a href="#yams.args">yams.args</a></li>
+        <li><a href="#yams.path">yams.path</a></li>
         <li><a href="#yams.headers">yams.headers</a></li>
         <li><a href="#yams.query">yams.query</a></li>
         <li><a href="#yams.cookies">yams.cookies</a></li>
@@ -134,10 +134,10 @@ yams.write([=[
           </pre>
         </li>
         <li>
-          <h4><a href="#yams.args" name="yams.args">yams.args</a></h4>
-          <p>Returns table with request path arguments.</p>
+          <h4><a href="#yams.path" name="yams.path">yams.path</a></h4>
+          <p>Returns table with request path parameters.</p>
           <pre>
-            yams.write("Value of path argument `arg1`: ", yams.args.arg1)
+            yams.write("Value of path parameter `param1`: ", yams.path.param1)
           </pre>
         </li>
         <li>

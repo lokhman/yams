@@ -85,7 +85,7 @@ func (s *luaScript) loader(l *lua.LState) int {
 	for k, v := range s.route.Args {
 		t.RawSetString(k, lua.LString(v))
 	}
-	l.SetField(s.mod, "args", t)
+	l.SetField(s.mod, "path", t)
 
 	// request headers
 	t = l.CreateTable(0, len(s.req.Header))
