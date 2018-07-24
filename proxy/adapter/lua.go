@@ -71,6 +71,7 @@ func (s *luaScript) loader(l *lua.LState) int {
 	// constants
 	l.SetField(s.mod, "routeid", lua.LString(s.route.UUID))
 	l.SetField(s.mod, "method", lua.LString(s.req.Method))
+	l.SetField(s.mod, "scheme", lua.LString(s.req.URL.Scheme))
 	l.SetField(s.mod, "host", lua.LString(s.req.Host))
 	l.SetField(s.mod, "uri", lua.LString(s.req.URL.Path))
 	l.SetField(s.mod, "ip", lua.LString(yams.ClientIP(s.req)))

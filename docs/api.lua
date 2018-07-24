@@ -20,6 +20,7 @@ yams.write([=[
       <ul>
         <li><a href="#yams.routeid">yams.routeid</a></li>
         <li><a href="#yams.method">yams.method</a></li>
+        <li><a href="#yams.scheme">yams.scheme</a></li>
         <li><a href="#yams.host">yams.host</a></li>
         <li><a href="#yams.uri">yams.uri</a></li>
         <li><a href="#yams.ip">yams.ip</a></li>
@@ -96,6 +97,13 @@ yams.write([=[
           <p>Returns request method (e.g. <em>GET</em>, <em>POST</em>, <em>DELETE</em>, etc).</p>
           <pre>
             yams.write("Request method: " .. yams.method)
+          </pre>
+        </li>
+        <li>
+          <h4><a href="#yams.scheme" name="yams.scheme">yams.scheme</a></h4>
+          <p>Returns request scheme (e.g. <em>http</em> or <em>https</em>).</p>
+          <pre>
+            yams.write("Request scheme: " .. yams.scheme)
           </pre>
         </li>
         <li>
