@@ -100,7 +100,7 @@
               for (let name in data.invalid) {
                 form[name].setCustomValidity(data.invalid[name])
               }
-              for (let input of form.elements) {
+              for (let input of Array.from(form.elements)) {
                 if (!input.validity.valid) {
                   input.focus()
                   break
@@ -125,7 +125,7 @@
         }
       },
       resetFormValidity (form, addWasValidatedClass) {
-        for (let input of form.elements) {
+        for (let input of Array.from(form.elements)) {
           if (input.name in form.elements) {
             input.setCustomValidity('')
           }
