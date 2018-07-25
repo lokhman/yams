@@ -36,6 +36,10 @@ module.exports = (_, argv) => {
         test: /\.vue$/,
         loader: 'vue-loader'
       }, {
+        test: /\.js$/,
+        exclude: /(node_modules|bower_components)/,
+        use: ['babel-loader']
+      }, {
         test: /\.(css|s[ac]ss)$/,
         use: [
           isProduction ? MiniCssExtractPlugin.loader : 'vue-style-loader',
