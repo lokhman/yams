@@ -6,7 +6,10 @@ local yams = require("yams")
 yams.write([=[<!doctype html>
 <html>
 <head>
+  <meta charset=utf-8>
   <title>YAMS Docs</title>
+  <meta name="viewport" content="width=device-width, initial-scale=0.5">
+  <style>pre { overflow-x: auto; }</style>
 </head>
 <body>
   <h1><img src="/yams.png" style="width: 64px; vertical-align: middle;"> YAMS Docs</h1>]=])
