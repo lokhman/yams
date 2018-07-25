@@ -1,6 +1,6 @@
 <template>
   <modal ref="modal" title="External URL">
-    <div ref="url" class="text-monospace">
+    <div ref="url" class="text-monospace" style="overflow-x: auto">
       <span><span
         v-if="host.includes(':')"
       >{{ scheme }}</span><a
