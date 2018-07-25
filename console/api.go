@@ -191,6 +191,25 @@ func (h *hAPI) getToken(c *gin.Context) string {
 	return token
 }
 
+type outUser struct {
+	Id         int           `json:"id"`
+	Username   string        `json:"username"`
+	Role       string        `json:"role"`
+	ACL        pq.Int64Array `json:"acl,omitempty"`
+	LastAuthAt *time.Time    `json:"last_auth_at"`
+	CreatedAt  time.Time     `json:"created_at"`
+}
+
+func (h *hAPI) outUser(c *gin.Context, id int) {
+	var out outUser
+	q := qb.Select("id", "username", "role", "array_remove(array_agg(profile_id), NULL)", "last_auth_at", "created_at").
+		From("users").LeftJoin("acl ON user_id = id").Where("id = ?", id).GroupBy("id")
+	if err := q.Scan(&out.Id, &out.Username, &out.Role, &out.ACL, &out.LastAuthAt, &out.CreatedAt); err != nil {
+		panic(err)
+	}
+	h.ok(c, out)
+}
+
 func (h *hAPI) Auth(roles ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := h.getToken(c)
@@ -262,28 +281,31 @@ func (h *hAPI) AuthRefreshAction(c *gin.Context) {
 	h.ok(c, gin.H{"token": yams.JWTSign(c.MustGet("auth").(yams.JWTClaims))})
 }
 
-type outUser struct {
-	Id         int           `json:"id"`
-	Username   string        `json:"username"`
-	Role       string        `json:"role"`
-	ACL        pq.Int64Array `json:"acl,omitempty"`
-	LastAuthAt *time.Time    `json:"last_auth_at"`
-	CreatedAt  time.Time     `json:"created_at"`
+func (h *hAPI) AuthPasswordAction(c *gin.Context) {
+	var in struct {
+		Old string `form:"old" json:"old" binding:"required,trim,min=3,max=72"`
+		New string `form:"new" json:"new" binding:"required,trim,min=3,max=72,nefield=Old"`
+	}
+	if !h.bind(c, &in) {
+		return
+	}
+
+	id := c.MustGet("auth").(yams.JWTClaims).Id
+	q := qb.Update("users").Set("password", sqrl.Expr("crypt(?, gen_salt('bf'))", in.New)).
+		Where("id = ? AND password = crypt(?, password)", id, in.Old).
+		Suffix("RETURNING TRUE")
+	if err := q.Scan(new(bool)); err != nil {
+		if err == sql.ErrNoRows {
+			h.forbidden(c, errCodeBadCredentials, nil)
+			return
+		}
+		panic(err)
+	}
+	h.ok(c, nil)
 }
 
 func (h *hAPI) AuthUserAction(c *gin.Context) {
-	id, ok := c.Get("_id")
-	if !ok {
-		id = c.MustGet("auth").(yams.JWTClaims).Id
-	}
-
-	var out outUser
-	q := qb.Select("id", "username", "role", "array_remove(array_agg(profile_id), NULL)", "last_auth_at", "created_at").
-		From("users").LeftJoin("acl ON user_id = id").Where("id = ?", id).GroupBy("id")
-	if err := q.Scan(&out.Id, &out.Username, &out.Role, &out.ACL, &out.LastAuthAt, &out.CreatedAt); err != nil {
-		panic(err)
-	}
-	h.ok(c, out)
+	h.outUser(c, c.MustGet("auth").(yams.JWTClaims).Id)
 }
 
 func (h *hAPI) UsersAction(c *gin.Context) {
@@ -312,8 +334,7 @@ func (h *hAPI) UsersViewAction(c *gin.Context) {
 		return
 	}
 
-	c.Set("_id", id)
-	h.AuthUserAction(c)
+	h.outUser(c, id)
 }
 
 type inUser struct {

@@ -50,10 +50,9 @@
           .catch(response => {
             this.$root.httpError(response, {
               401: () => {
-                const input = e.target.password
                 this.form.password = ''
-                input.setCustomValidity('auth')
-                input.focus()
+                e.target.password.setCustomValidity('auth')
+                e.target.password.focus()
               }
             }, elForm)
           })

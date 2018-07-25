@@ -6,7 +6,7 @@
     <header>
       <nav class="navbar navbar-expand-lg navbar-dark fixed-top bg-dark flex-md-nowrap shadow px-4">
         <router-link :to="{name: 'index'}" class="navbar-brand">YAMS Console</router-link>
-        <button type="button" class="navbar-toggler" data-toggle="collapse" data-target="#navbar">
+        <button v-if="token" type="button" class="navbar-toggler" data-toggle="collapse" data-target="#navbar">
           <span class="navbar-toggler-icon" />
         </button>
         <div v-if="token" class="collapse navbar-collapse" id="navbar">
@@ -31,10 +31,15 @@
                 <i class="fas fa-fw fa-users" /> Users
               </router-link>
             </li>
+            <li class="nav-item">
+              <a class="nav-link" @click="onChangePasswordClick">
+                <i class="fas fa-fw fa-key" /> Password
+              </a>
+            </li>
           </ul>
           <ul class="navbar-nav">
-            <li class="nav-item text-nowrap">
-              <a class="nav-link" @click="doLogout">
+            <li class="nav-item">
+              <a class="nav-link" @click="doLogout()">
                 <i class="fas fa-fw fa-sign-out-alt" /> Sign out
               </a>
             </li>
@@ -54,6 +59,7 @@
   import Cookie from 'js-cookie'
   import router from './router'
   import RequestError from './components/modals/RequestError'
+  import ChangePassword from './components/modals/ChangePassword'
 
   export default {
     name: 'Yams',
@@ -170,6 +176,9 @@
         }
         this.dirty = false
         return true
+      },
+      onChangePasswordClick (e) {
+        this.showModal(ChangePassword, this)
       },
       doGetAuth (callback) {
         if (!this.token) {

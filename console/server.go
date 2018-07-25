@@ -43,6 +43,7 @@ func handler() http.Handler {
 	api = &hAPI{r.Group("/api")}
 	api.GET("/auth", api.Auth(yams.AnyRole...), api.AuthUserAction)
 	api.POST("/auth/refresh", api.Auth(yams.AnyRole...), api.AuthRefreshAction)
+	api.POST("/auth/password", api.Auth(yams.AnyRole...), api.AuthPasswordAction)
 
 	api.GET("/users", api.Auth(yams.RoleAdmin), api.UsersAction)
 	api.POST("/users", api.Auth(yams.RoleAdmin), api.UsersCreateAction)
