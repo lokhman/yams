@@ -6,6 +6,7 @@
       >{{ scheme }}</span><a
         v-else
         v-tooltip="'Click to switch scheme'"
+        data-boundary="viewport"
         tabindex="0"
         @click="onSchemeClick"
       >{{ scheme }}</a></span>://{{ host }}<template
@@ -13,6 +14,7 @@
       ><a
         v-if="segment[0] === '{' && segment[segment.length-1] === '}'"
         v-tooltip="`Click to set ${segment}`"
+        data-boundary="viewport"
         contenteditable="true"
         tabindex="0"
         @click="onSegmentClick"
