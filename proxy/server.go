@@ -35,7 +35,7 @@ func (s *handler) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	}
 
 	r = model.MatchRoute(p, req.Method, req.URL.Path)
-	if r == nil || !r.IsEnabled {
+	if r == nil {
 		if p.Backend == nil {
 			perror(rw, http.StatusNotFound, fmt.Sprintf(`yams: no route found for path "%s"`, req.URL.Path), nil, skipError)
 			return
