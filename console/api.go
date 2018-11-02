@@ -46,7 +46,7 @@ func (_ *hAPI) error(c *gin.Context, code int, err error, vars gin.H) {
 }
 
 func (h *hAPI) unauthorized(c *gin.Context, errorCode int, err error) {
-	c.Header("www-authenticate", `Bearer realm="YAMS API"`)
+	c.Header("WWW-Authenticate", `Bearer realm="YAMS API"`)
 	h.error(c, code(http.StatusUnauthorized, errorCode), err, nil)
 }
 
